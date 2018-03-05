@@ -1,5 +1,4 @@
 FROM openjdk:8
-FROM continuumio/anaconda
 
 LABEL authors="will.rowe@stfc.ac.uk" \
     description="Docker image containing all requirements for drax pipeline"
@@ -24,24 +23,22 @@ RUN apt-get update && \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Update conda and install what we can
-RUN conda update conda -y
-RUN conda install -c bioconda  groot==0.3 r-essentials==3.4.1
-
 # Install pip
 RUN curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /opt/get-pip.py && \
     python /opt/get-pip.py && \
     rm /opt/get-pip.py
 
-RUN curl -fsSL http://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.11.5.zip -o /opt/fastqc_v0.11.5.zip && \
-    unzip /opt/fastqc_v0.11.5.zip -d /opt/ && \
-    chmod 755 /opt/FastQC/fastqc && \
-    ln -s /opt/FastQC/fastqc /usr/local/bin/fastqc && \
-    rm /opt/fastqc_v0.11.5.zip
+# Install conda and install what we can
+RUN echo 'export PATH=/opt/conda/bin:$PATH' > /etc/profile.d/conda.sh && \
+    wget --quiet https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh && \
+    /bin/bash ~/miniconda.sh -b -p /opt/conda && \
+    rm ~/miniconda.sh
+ENV PATH /opt/conda/bin:$PATH
+RUN conda config --add channels defaults && \
+    conda config --add channels conda-forge && \
+    conda config --add channels bioconda
+RUN conda install -c bioconda  groot==0.3 r-essentials==3.4.1 fastqc==0.11.7
+
 
 # Install MultiQC
 RUN pip install git+git://github.com/ewels/MultiQC.git
-
-# Create root directories for common Swedish HPC systems
-RUN mkdir /pica /lupus /crex1 /crex2 /proj /scratch /sw \
-          /c3se /local /apps
