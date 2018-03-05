@@ -21,6 +21,8 @@ RUN apt-get update && \
         make \
         python-dev \
         zlib1g-dev \
+        r-base \
+        r-base-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install pip
@@ -37,7 +39,7 @@ ENV PATH /opt/conda/bin:$PATH
 RUN conda config --add channels defaults && \
     conda config --add channels conda-forge && \
     conda config --add channels bioconda
-RUN conda install -c bioconda  groot==0.3 r-essentials==3.4.1 fastqc==0.11.7
+RUN conda install -c bioconda  groot==0.3 fastqc==0.11.7
 
 
 # Install MultiQC
