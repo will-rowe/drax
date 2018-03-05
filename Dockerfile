@@ -1,4 +1,5 @@
 FROM openjdk:8
+FROM continuumio/anaconda
 
 LABEL authors="will.rowe@stfc.ac.uk" \
     description="Docker image containing all requirements for drax pipeline"
@@ -22,6 +23,10 @@ RUN apt-get update && \
         python-dev \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Update conda and install what we can
+RUN conda update conda -y
+RUN conda install -c bioconda  groot==0.3 r-essentials==3.4.1
 
 # Install pip
 RUN curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /opt/get-pip.py && \

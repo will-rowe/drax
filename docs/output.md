@@ -1,5 +1,5 @@
 # drax
-This pipeline Detects Resistome Associated taXa in metagenomes
+Detecting Resistome Associated taXa
 
 This document describes the output produced by the pipeline. Most of the plots are taken from the MultiQC report, which summarises results at the end of the pipeline.
 
