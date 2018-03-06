@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+git clone https://github.com/will-rowe/drax && cd drax/tests
+
 curl -s https://get.nextflow.io | bash
 
 run_name="Test drax Run: "$(date +%s)
