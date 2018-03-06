@@ -25,14 +25,14 @@ The public docker images are tagged with the same version numbers as the code, w
 ## Singularity image
 Many HPC environments are not able to run Docker due to security issues. [Singularity](http://singularity.lbl.gov/) is a tool designed to run on such HPC systems which is very similar to Docker. Even better, it can use create images directly from dockerhub.
 
-To use the singularity image for a single run, use `-with-singularity 'docker://drax'`. This will download the docker container from dockerhub and create a singularity image for you dynamically.
+To use the singularity image for a single run, use `-with-singularity 'docker:/wpmr/drax'`. This will download the docker container from dockerhub and create a singularity image for you dynamically.
 
 If you intend to run the pipeline offline, nextflow will not be able to automatically download the singularity image for you. Instead, you'll have to do this yourself manually first, transfer the image file and then point to that.
 
 First, pull the image file where you have an internet connection:
 
 ```bash
-singularity pull --name drax.img docker://drax
+singularity pull --name drax.img docker:/wpmr/drax
 ```
 
 Then transfer this file and run the pipeline with this path:

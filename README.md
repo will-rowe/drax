@@ -1,12 +1,10 @@
 <div align="center">
-  <img src="" alt="drax-logo" width="250">
-  <br><br>
-  <h1>DRAX</h1>
-  <h3><a style="color:#FF6600">D</a>etecting <a style="color:#FF6600">R</a>esistome <a style="color:#FF6600">A</a>ssociated ta<a style="color:#FF6600">X</a>a </h3>
+  <img src="assets/misc/drax-logo-with-text.png" alt="drax-logo" width="250">
+  <h3><a style="color:#780200">D</a>etecting <a style="color:#780200">R</a>esistome <a style="color:#780200">A</a>ssociated ta<a style="color:#780200">X</a>a </h3>
   <hr>
   <a href="https://travis-ci.org/will-rowe/drax"><img src="https://travis-ci.org/will-rowe/drax.svg?branch=master" alt="travis"></a>
   <a href="https://www.nextflow.io"><img src="https://img.shields.io/badge/nextflow-%E2%89%A50.24.0-brightgreen.svg" alt="Nextflow"></a>
-  <a href="https://github.com/will-rowe/groot/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-MIT-orange.svg" alt="License"></a>
+  <a href="https://github.com/will-rowe/drax/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-MIT-orange.svg" alt="License"></a>
 </div>
 
 ***
@@ -15,4 +13,41 @@
 
 ## Overview
 
-`DRAX` is a [Nextflow](https://www.nextflow.io) pipeline to detect resistome associated taxa in metagenomes. It identifies Antimicrobial Resistance Genes (ARGs) using [GROOT](https://www.biorxiv.org/content/early/2018/02/28/270835), extracts the genomic environment of each ARG using [Metacherchant](https://academic.oup.com/bioinformatics/article-abstract/34/3/434/4575138?redirectedFrom=fulltext) and then performs taxanomic classification of assembled environments. Further pipeline steps and documentation is being added.
+`DRAX` is a [Nextflow](https://www.nextflow.io) pipeline to detect resistome associated taxa in metagenomes. It identifies Antimicrobial Resistance Genes (ARGs) using [GROOT](https://www.biorxiv.org/content/early/2018/02/28/270835), extracts the genomic environment of each ARG using [Metacherchant](https://academic.oup.com/bioinformatics/article-abstract/34/3/434/4575138?redirectedFrom=fulltext) and then performs taxanomic classification of assembled environments. Further pipeline steps and full documentation are being added.
+
+
+
+## Quick Start
+
+Assuming you have [Nextflow](https://www.nextflow.io/) and [Docker](https://www.docker.com/) installed, you can run `DRAX` like this:
+
+```
+nextflow run will-rowe/drax --reads 'tests/*R{1,2}.fq.gz' -profile docker
+```
+
+If you can't use Docker, you can use Singularity:
+
+```
+nextflow run will-rowe/drax --reads 'tests/*R{1,2}.fq.gz'  -with-singularity 'docker://wpmr/drax'
+```
+
+For running without containers, try [bioconda](https://bioconda.github.io/) to manage pipeline dependencies:
+
+```
+yes | conda env create -n drax -f ./drax-conda-environment.yml
+source activate drax
+nextflow run will-rowe/drax --reads 'tests/*R{1,2}.fq.gz'
+```
+
+
+## Documentation
+
+The `DRAX` pipeline comes with documentation about the pipeline, found in the `docs/` directory:
+
+1. [Installation](docs/installation.md)
+2. Pipeline configuration
+    * [Local installation](docs/configuration/local.md)
+    * [Adding your own system](docs/configuration/adding_your_own.md)
+3. [Running the pipeline](docs/usage.md)
+4. [Output and how to interpret the results](docs/output.md)
+5. [Troubleshooting](docs/troubleshooting.md)
