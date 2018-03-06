@@ -30,7 +30,7 @@ RUN curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /opt/get-pip.py && \
 
 # Install conda and install what we can
 RUN echo 'export PATH=/opt/conda/bin:$PATH' > /etc/profile.d/conda.sh && \
-    wget --quiet https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh && \
+    wget --quiet https://repo.continuum.io/miniconda/Miniconda3-4.3.31-Linux-x86_64.sh -O ~/miniconda.sh && \
     /bin/bash ~/miniconda.sh -b -p /opt/conda && \
     rm ~/miniconda.sh
 ENV PATH /opt/conda/bin:$PATH
@@ -38,4 +38,4 @@ RUN conda config --add channels defaults && \
     conda config --add channels conda-forge && \
     conda config --add channels bioconda
 RUN curl -fsSL https://raw.githubusercontent.com/will-rowe/drax/master/drax-conda-environment.yml -o drax-conda-environment.yml
-RUN conda install --file drax-conda-environment.yml -y
+RUN conda install -y --file drax-conda-environment.yml
