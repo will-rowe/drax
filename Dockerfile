@@ -37,4 +37,5 @@ ENV PATH /opt/conda/bin:$PATH
 RUN conda config --add channels defaults && \
     conda config --add channels conda-forge && \
     conda config --add channels bioconda
-RUN conda install -c bioconda  r-essentials==1.7.0 fastqc==0.11.7 multiqc==1.4 bbmap==37.90 fastp==0.12.4 seqkit==0.7.2 samtools==1.4 groot==0.3 metacherchant==0.1.0
+RUN curl -fsSL https://raw.githubusercontent.com/will-rowe/drax/master/drax-conda-environment.yml -o drax-conda-environment.yml
+RUN conda install --file drax-conda-environment.yml -y

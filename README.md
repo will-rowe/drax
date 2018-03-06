@@ -16,27 +16,32 @@
 `DRAX` is a [Nextflow](https://www.nextflow.io) pipeline to detect resistome associated taxa in metagenomes. It identifies Antimicrobial Resistance Genes (ARGs) using [GROOT](https://www.biorxiv.org/content/early/2018/02/28/270835), extracts the genomic environment of each ARG using [Metacherchant](https://academic.oup.com/bioinformatics/article-abstract/34/3/434/4575138?redirectedFrom=fulltext) and then performs taxanomic classification of assembled environments. Further pipeline steps and full documentation are being added.
 
 
-
 ## Quick Start
 
-Assuming you have [Nextflow](https://www.nextflow.io/) and [Docker](https://www.docker.com/) installed, you can run `DRAX` like this:
+You can use [bioconda](https://bioconda.github.io/) to manage all of the `DRAX` pipeline dependencies:
 
 ```
-nextflow run will-rowe/drax --reads 'tests/*R{1,2}.fq.gz' -profile docker
-```
+# Get the software requirements list
+wget https://raw.githubusercontent.com/will-rowe/drax/master/drax-conda-environment.yml
 
-If you can't use Docker, you can use Singularity:
+# Create a conda environment
+yes | conda env create -n drax -f drax-conda-environment.yml && source activate drax
 
-```
-nextflow run will-rowe/drax --reads 'tests/*R{1,2}.fq.gz'  -with-singularity 'docker://wpmr/drax'
-```
-
-For running without containers, try [bioconda](https://bioconda.github.io/) to manage pipeline dependencies:
-
-```
-yes | conda env create -n drax -f ./drax-conda-environment.yml
-source activate drax
+# Run DRAX
 nextflow run will-rowe/drax --reads 'tests/*R{1,2}.fq.gz'
+```
+
+Alternatively, you can also run `DRAX` using containers:
+
+```
+# Install Nextflow
+curl -s https://get.nextflow.io | bash
+
+# Run DRAX with Docker
+./nextflow run will-rowe/drax --reads 'tests/*R{1,2}.fq.gz' -profile docker
+
+# OR run DRAX with Singularity
+./nextflow run will-rowe/drax --reads 'tests/*R{1,2}.fq.gz' -with-singularity 'docker://wpmr/drax'
 ```
 
 
