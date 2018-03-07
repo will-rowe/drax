@@ -28,10 +28,12 @@ def helpMessage() {
     Mandatory arguments:
       --reads                       Path to input data (must be surrounded with quotes)
       --genome                      Name of iGenomes reference
+      --path2ref                Path to the pre-indexed reference data for BBmap (used in Decontamination step)
       -profile                      Hardware config to use. docker / aws
 
     Options:
       --singleEnd                   Specifies that the input is single end reads
+      --qual                            Quality cut-off to use in QC workflow (deduplication, trimming etc.)
 
     References                      If not specified in the configuration file or you wish to overwrite any of the references.
       --fasta                       Path to Fasta reference
@@ -60,6 +62,7 @@ if (params.help){
 }
 
 // Configurable variables
+params.singleEnd = false
 params.name = false
 params.fasta = params.genome ? params.genomes[ params.genome ].fasta ?: false : false
 params.multiqc_config = "$baseDir/conf/multiqc_config.yaml"
@@ -69,21 +72,14 @@ params.email = false
 params.plaintext_email = false
 multiqc_config = file(params.multiqc_config)
 output_docs = file("$baseDir/docs/output.md")
+params.qual = 20
+params.path2ref = ""
 
 // Validate inputs
 if ( params.fasta ){
     fasta = file(params.fasta)
     if( !fasta.exists() ) exit 1, "Fasta file not found: ${params.fasta}"
 }
-//
-// NOTE - THIS IS NOT USED IN THIS PIPELINE, EXAMPLE ONLY
-// If you want to use the above in a process, define the following:
-//   input:
-//   file fasta from fasta
-//
-
-
-
 
 // Has the run name been specified by the user?
 //  this has the bonus effect of catching both -name and --name
@@ -91,16 +87,6 @@ custom_runName = params.name
 if( !(workflow.runName ==~ /[a-z]+_[a-z]+/) ){
   custom_runName = workflow.runName
 }
-
-/*
- * Create a channel for input read files
- */
-params.singleEnd = false
-Channel
-    .fromFilePairs( params.reads, size: params.singleEnd ? 1 : 2 )
-    .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!\nIf this is single-end data, please specify --singleEnd on the command line." }
-    .set { read_files_fastqc }
-
 
 // Header log info
 log.info "========================================="
@@ -127,7 +113,6 @@ if(params.email) summary['E-mail Address'] = params.email
 log.info summary.collect { k,v -> "${k.padRight(15)}: $v" }.join("\n")
 log.info "========================================="
 
-
 // Check that Nextflow version is up to date enough
 // try / throw / catch works for NF versions < 0.25 when this was implemented
 nf_required_version = '0.25.0'
@@ -143,6 +128,10 @@ try {
               "============================================================"
 }
 
+// create some additional log files
+logFileForDeduplicate = file(params.outdir + "/deduplicate.log")
+logFileForTrimming = file(params.outdir + "/trimming.log")
+logFileForDecontamination = file(params.outdir + "/decontaminate.log")
 
 /*
  * Parse software version numbers
@@ -163,13 +152,44 @@ process get_software_versions {
 }
 
 
+/*
+ * Create channels
+ */
+Channel
+    .fromFilePairs( params.reads, size: params.singleEnd ? 1 : 2 )
+    .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!\nIf this is single-end data, please specify --singleEnd on the command line." }
+    .set { read_files_fastqc }
+
+Channel
+    .fromFilePairs( params.reads )
+    .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!\nIf this is single-end data, please specify --singleEnd on the command line." }
+    .set { read_files_to_deduplicate }
+
 
 /*
- * STEP 1 - FastQC
+ * Do I need to set up number of CPUs to use (split accross the 2 channels)?
+
+if ( params.max_cpus < 2 ) {
+    cpus = 1
+} else if ( params.max_cpus%2 == 0 ) {
+    cpus = ( params.max_cpus / 2 )
+} else {
+    cpus = ( (params.max_cpus - 1) / 2 )
+}
+*/
+cpus = params.max_cpus
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////    START DOING STUFF
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+/*
+ * FastQC
  */
 process fastqc {
     tag "$name"
-    publishDir "${params.outdir}/fastqc", mode: 'copy',
+    publishDir "${params.outdir}/fastqc-initial-check", mode: 'copy',
         saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
 
     input:
@@ -180,22 +200,160 @@ process fastqc {
 
     script:
     """
-    fastqc -q $reads
+    fastqc -q $reads -t $cpus
     """
 }
 
 
+/*
+ * Deduplicate
+ */
+process deduplicate {
+    tag "$sampleID"
+
+    input:
+    set sampleID, file(reads) from read_files_to_deduplicate
+
+	output:
+    set sampleID, file("${sampleID}*.deduplicated.fq.gz") into read_files_to_trim
+    file("${sampleID}.deduplicate.log") into logDeduplicate
+
+    script:
+	"""
+    # log some stuff
+    echo "------------------------------------------------------" >> ${sampleID}.deduplicate.log
+    echo "SAMPLE: ${sampleID}" >> ${sampleID}.deduplicate.log
+    echo "------------------------------------------------------" >> ${sampleID}.deduplicate.log
+
+    # set up the command
+    if [ \"$params.singleEnd\" = \"false\" ]; then
+		dedupeCMD=\"clumpify.sh dedupe in1=${reads[0]} in2=${reads[1]} out1=${sampleID}_R1.deduplicated.fq.gz out2=${sampleID}_R2.deduplicated.fq.gz subs=0 threads=${cpus}\"
+    else
+        dedupeCMD=\"clumpify.sh dedupe in1=${reads[0]} out1=${sampleID}_R1.deduplicated.fq.gz subs=0 qin=${params.qual} threads=${cpus}\"
+	fi
+
+    # run the command
+    exec \$dedupeCMD 2>&1 | tee .tmp
+
+    # parse the command output and log more stuff
+    duplicatesFound=\$(grep \"Duplicates Found:\" .tmp | cut -f 1 | cut -d: -f 2 | sed 's/ //g')
+    readsIn=\$(grep \"Reads In:\" .tmp | cut -f 1 | cut -d: -f 2 | sed 's/ //g')
+    remainingReads=\$((\$readsIn-\$duplicatesFound))
+    percentage=\$(echo \$remainingReads \$readsIn | awk '{print \$1/\$2*100}' )
+    sed -n '/Reads In:/,/Total time:/p' .tmp >> ${sampleID}.deduplicate.log
+    printf "\n\$percentage%% of reads retained.\n\n" >> ${sampleID}.deduplicate.log
+	"""
+}
+
 
 /*
- * STEP 2 - MultiQC
+ * Trimming
+ */
+process trimming {
+    tag "$sampleID"
+
+    input:
+    set sampleID, file(reads) from read_files_to_trim
+
+	output:
+    file("${sampleID}.trimming.log") into logTrimming
+    set sampleID, file("${sampleID}*.deduplicated.trimmed.fq.gz") into read_files_to_decontaminate
+
+    script:
+	"""
+    # log some stuff
+    echo "------------------------------------------------------" >> ${sampleID}.trimming.log
+    echo "SAMPLE: ${sampleID}" >> ${sampleID}.trimming.log
+    echo "------------------------------------------------------" >> ${sampleID}.trimming.log
+
+    # set up the command
+    if [ \"$params.singleEnd\" = \"false\" ]; then
+		fastpCMD=\"fastp -i ${reads[0]} -I ${reads[1]} -o ${sampleID}_R1.deduplicated.trimmed.fq.gz -O ${sampleID}_R2.deduplicated.trimmed.fq.gz -M ${params.qual} --cut_by_quality5 -w ${cpus}\"
+    else
+        fastpCMD=\"fastp -i ${reads[0]} -o ${sampleID}_R1.deduplicated.trimmed.fq.gz -M ${params.qual} --cut_by_quality5 -w ${cpus}\"
+	fi
+
+    # run the command
+    exec \$fastpCMD 2>&1 | tee .tmp
+
+    # parse the command output and log more stuff
+    sed -n '/Read1 before filtering/,/bases trimmed due to adapters/p' .tmp >> ${sampleID}.trimming.log
+	"""
+}
+
+
+/*
+ * Decontaminate
+ */
+process decontaminate {
+    tag "$sampleID"
+    publishDir "${params.outdir}/clean_data", mode: 'copy', pattern: "*_clean.fq.gz"
+
+    input:
+    set sampleID, file(reads) from read_files_to_decontaminate
+
+	output:
+    file("${sampleID}.decontaminate.log") into logDecontaminate
+    file("*_clean.fq.gz")
+    set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads
+
+    script:
+	"""
+    # log some stuff
+    echo "------------------------------------------------------" >> ${sampleID}.decontaminate.log
+    echo "SAMPLE: ${sampleID}" >> ${sampleID}.decontaminate.log
+    echo "------------------------------------------------------" >> ${sampleID}.decontaminate.log
+
+    # set up the command
+
+    #Defines command for removing synthetic contaminants
+	if [ \"$params.singleEnd\" = \"false\" ]; then
+		decontaminateCMD=\"bbwrap.sh mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} in2=${reads[1]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${params.path2ref}\"
+    else
+        decontaminateCMD=\"bbwrap.sh mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${params.path2ref}\"
+	fi
+
+    # run the command
+    exec \$decontaminateCMD 2>&1 | tee .tmp
+
+    # parse the command output and log more stuff
+    sed -n '/Read 1 data:/,/Total time/p' .tmp >> ${sampleID}.decontaminate.log
+    cat .tmp >> ${sampleID}.decontaminate.log
+	"""
+}
+
+
+/*
+ * Post QC FastQC check
+ */
+process postQCcheck {
+    tag "$sampleID"
+    publishDir "${params.outdir}/fastqc-postqc-check", mode: 'copy',
+        saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
+
+    input:
+    set sampleID, file(reads) from quality_filtered_reads
+
+    output:
+    file "*_fastqc.{zip,html}" into fastqc_results2
+
+    script:
+    """
+    fastqc -q $reads -t $cpus
+    """
+}
+
+
+/*
+ * MultiQC
  */
 process multiqc {
-    tag "$prefix"
     publishDir "${params.outdir}/MultiQC", mode: 'copy'
 
     input:
     file multiqc_config
-    file ('fastqc/*') from fastqc_results.collect()
+    file ('fastqc-initial-check/*') from fastqc_results.collect()
+    file ('fastqc-postqc-check/*') from fastqc_results2.collect()
     file ('software_versions/*') from software_versions_yaml
 
     output:
@@ -210,9 +368,30 @@ process multiqc {
     """
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////    CLEAN UP
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 
 /*
- * STEP 3 - Output Description HTML
+ * STEP X - Output logs
+ */
+process output_logs {
+    input:
+    file(tolog1) from logDeduplicate.flatMap()
+    file(tolog2) from logTrimming.flatMap()
+    file(tolog3) from logDecontaminate.flatMap()
+
+    script:
+    """
+    cat $tolog1 >> $logFileForDeduplicate
+    cat $tolog2 >> $logFileForTrimming
+    cat $tolog3 >> $logFileForDecontamination
+    """
+}
+
+/*
+ * STEP X - Output description HTML
  */
 process output_documentation {
     tag "$prefix"
@@ -229,7 +408,6 @@ process output_documentation {
     markdown_to_html.r $output_docs results_description.html
     """
 }
-
 
 
 /*
