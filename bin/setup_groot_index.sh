@@ -10,7 +10,8 @@ meanRL=$(awk '{ sum +=$1; n++ } END { if (n > 0) printf "%3.0f", sum /n}' averag
 stdev=$(awk '{sum+=$1; sumsq+=$1*$1} END {print sqrt(sumsq/NR - (sum/NR)**2)}' averageReadLength.txt)
 
 # check that we can generate a GROOT index suitable for all samples
-if [ $stdev -gt 10 ]; then
+cutoff=10
+if [ $stdev -gt $cutoff ]; then
     echo "The mean read length of the cleaned data is too variable to run GROOT on all samples!"; exit $ERRCODE;
 fi
 

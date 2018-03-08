@@ -393,6 +393,7 @@ process multiqc {
 
     output:
     file "groot-align.log"
+    file "*.bam"
 
     script:
     """
@@ -400,10 +401,10 @@ process multiqc {
     setup_groot_index.sh ${stats} ${cpus} ${params.outdir}/groot-index
 
     # align the reads
-    grootAlignCMD=\"groot align -i ${params.outdir}/groot-index -f ${reads[0]} -p ${cpus} > ${sampleID}-groot-classified.bam\"
+    grootAlignCMD=\"groot align -i ${params.outdir}/groot-index -f ${reads[0]} -p ${cpus}\"
 
     # run the commands
-    exec \$grootAlignCMD 2>&1 | tee .tmp
+    exec \$grootAlignCMD > ${sampleID}-groot-classified.bam
     """
  }
 
