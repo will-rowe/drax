@@ -1,0 +1,13 @@
+#Summary
+#Generated on	Thu Mar 08 09:46:36 GMT 2018
+#Version	5
+chroms	1
+bases	207227
+defined	113825
+undefined	93402
+contigs	259
+scaffolds	259
+interpad	300
+source	/Users/willrowe/Documents/Code/git-repos/drax/assets/bbmap/artifacts_and_phix174_ill.ref.fa
+bytes	118604
+last modified	1520498353000

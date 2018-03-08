@@ -28,7 +28,7 @@ def helpMessage() {
     Mandatory arguments:
       --reads                       Path to input data (must be surrounded with quotes)
       --genome                      Name of iGenomes reference
-      --path2ref                Path to the pre-indexed reference data for BBmap (used in Decontamination step)
+      --path2ref                Path to FASTA file containing contaminants to subtract
       -profile                      Hardware config to use. docker / aws
 
     Options:
@@ -73,7 +73,7 @@ params.plaintext_email = false
 multiqc_config = file(params.multiqc_config)
 output_docs = file("$baseDir/docs/output.md")
 params.qual = 20
-params.path2ref = ""
+params.path2ref = "${baseDir}/assets/bbmap"
 
 // Validate inputs
 if ( params.fasta ){
@@ -133,11 +133,11 @@ logFileForDeduplicate = file(params.outdir + "/deduplicate.log")
 logFileForTrimming = file(params.outdir + "/trimming.log")
 logFileForDecontamination = file(params.outdir + "/decontaminate.log")
 
+
 /*
  * Parse software version numbers
  */
 process get_software_versions {
-
     output:
     file 'software_versions_mqc.yaml' into software_versions_yaml
 
@@ -168,7 +168,6 @@ Channel
 
 /*
  * Do I need to set up number of CPUs to use (split accross the 2 channels)?
-
 if ( params.max_cpus < 2 ) {
     cpus = 1
 } else if ( params.max_cpus%2 == 0 ) {
@@ -178,6 +177,7 @@ if ( params.max_cpus < 2 ) {
 }
 */
 cpus = params.max_cpus
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////    START DOING STUFF
