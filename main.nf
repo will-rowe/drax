@@ -26,27 +26,26 @@ def helpMessage() {
     nextflow run will-rowe/drax --reads '*_R{1,2}.fastq.gz' -profile docker
 
     Mandatory arguments:
-      --reads                       Path to input data (must be surrounded with quotes)
-      --genome                      Name of iGenomes reference
-      --path2ref                Path to FASTA file containing contaminants to subtract
-      -profile                      Hardware config to use. docker / aws
+      --reads                                  Path to input data (must be surrounded with quotes)
 
-    Options:
-      --singleEnd                   Specifies that the input is single end reads
-      --qual                            Quality cut-off to use in QC workflow (deduplication, trimming etc.)
-
-    References                      If not specified in the configuration file or you wish to overwrite any of the references.
-      --fasta                       Path to Fasta reference
+    QC options:
+      --singleEnd                          Specifies that the input is single end reads
+      --qual                                    Quality cut-off to use in QC workflow (deduplication, trimming etc.)
+      --subReference                 Path to BBmap index for read subtraction
+      --fasta                                  Path to Fasta reference (not used yet...)
 
     Other options:
-      --outdir                      The output directory where the results will be saved
-      --email                       Set this parameter to your e-mail address to get a summary e-mail with details of the run sent to you when the workflow exits
-      -name                         Name for the pipeline run. If not specified, Nextflow will automatically generate a random mnemonic.
+      --outdir                               The output directory where the results will be saved
+      --email                                Set this parameter to your e-mail address to get a summary e-mail with details of the run sent to you when the workflow exits
+      -name                                 Name for the pipeline run. If not specified, Nextflow will automatically generate a random mnemonic
+      -profile                               Hardware config to use. docker / aws
     """.stripIndent()
 }
 
 
-
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////    CONFIG
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /*
  * SET UP CONFIGURATION VARIABLES
  */
@@ -64,7 +63,6 @@ if (params.help){
 // Configurable variables
 params.singleEnd = false
 params.name = false
-params.fasta = params.genome ? params.genomes[ params.genome ].fasta ?: false : false
 params.multiqc_config = "$baseDir/conf/multiqc_config.yaml"
 params.reads = "data/*{1,2}.fastq.gz"
 params.outdir = './results'
@@ -73,13 +71,16 @@ params.plaintext_email = false
 multiqc_config = file(params.multiqc_config)
 output_docs = file("$baseDir/docs/output.md")
 params.qual = 20
-params.path2ref = "${baseDir}/assets/bbmap"
+params.subReference = "${baseDir}/assets/bbmap"
+params.fasta = ""
 
 // Validate inputs
 if ( params.fasta ){
     fasta = file(params.fasta)
     if( !fasta.exists() ) exit 1, "Fasta file not found: ${params.fasta}"
 }
+bbmapRef = file(params.subReference)
+if ( !bbmapRef.isDirectory() ) exit 1, "errrrrrrr"
 
 // Has the run name been specified by the user?
 //  this has the bonus effect of catching both -name and --name
@@ -131,7 +132,7 @@ try {
 // create some additional log files
 logFileForDeduplicate = file(params.outdir + "/deduplicate.log")
 logFileForTrimming = file(params.outdir + "/trimming.log")
-logFileForDecontamination = file(params.outdir + "/decontaminate.log")
+logFileForReadSubtraction = file(params.outdir + "/readSubtraction.log")
 
 
 /*
@@ -180,10 +181,8 @@ cpus = params.max_cpus
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////    START DOING STUFF
+////    QUALITY  CONTROL
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
 /*
  * FastQC
  */
@@ -257,7 +256,7 @@ process trimming {
 
 	output:
     file("${sampleID}.trimming.log") into logTrimming
-    set sampleID, file("${sampleID}*.deduplicated.trimmed.fq.gz") into read_files_to_decontaminate
+    set sampleID, file("${sampleID}*.deduplicated.trimmed.fq.gz") into read_files_to_readSubtraction
 
     script:
 	"""
@@ -283,42 +282,40 @@ process trimming {
 
 
 /*
- * Decontaminate
+ * ReadSubtraction
  */
-process decontaminate {
+process readSubtraction {
     tag "$sampleID"
     publishDir "${params.outdir}/clean_data", mode: 'copy', pattern: "*_clean.fq.gz"
 
     input:
-    set sampleID, file(reads) from read_files_to_decontaminate
+    set sampleID, file(reads) from read_files_to_readSubtraction
 
 	output:
-    file("${sampleID}.decontaminate.log") into logDecontaminate
+    file("${sampleID}.readSubtraction.log") into logReadSubtraction
     file("*_clean.fq.gz")
     set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads
 
     script:
 	"""
     # log some stuff
-    echo "------------------------------------------------------" >> ${sampleID}.decontaminate.log
-    echo "SAMPLE: ${sampleID}" >> ${sampleID}.decontaminate.log
-    echo "------------------------------------------------------" >> ${sampleID}.decontaminate.log
+    echo "------------------------------------------------------" >> ${sampleID}.readSubtraction.log
+    echo "SAMPLE: ${sampleID}" >> ${sampleID}.readSubtraction.log
+    echo "------------------------------------------------------" >> ${sampleID}.readSubtraction.log
 
     # set up the command
-
-    #Defines command for removing synthetic contaminants
 	if [ \"$params.singleEnd\" = \"false\" ]; then
-		decontaminateCMD=\"bbwrap.sh mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} in2=${reads[1]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${params.path2ref}\"
+		readSubtractionCMD=\"bbwrap.sh mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} in2=${reads[1]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${params.subReference}\"
     else
-        decontaminateCMD=\"bbwrap.sh mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${params.path2ref}\"
+        readSubtractionCMD=\"bbwrap.sh mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${params.subReference}\"
 	fi
 
     # run the command
-    exec \$decontaminateCMD 2>&1 | tee .tmp
+    exec \$readSubtractionCMD 2>&1 | tee .tmp
 
     # parse the command output and log more stuff
-    sed -n '/Read 1 data:/,/Total time/p' .tmp >> ${sampleID}.decontaminate.log
-    cat .tmp >> ${sampleID}.decontaminate.log
+    sed -n '/Read 1 data:/,/Total time/p' .tmp >> ${sampleID}.readSubtraction.log
+    cat .tmp >> ${sampleID}.readSubtraction.log
 	"""
 }
 
@@ -368,30 +365,46 @@ process multiqc {
     """
 }
 
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////    RESISTOME PROFILING
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////    CLEAN UP
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
 /*
- * STEP X - Output logs
+ * Output logs
  */
 process output_logs {
     input:
     file(tolog1) from logDeduplicate.flatMap()
     file(tolog2) from logTrimming.flatMap()
-    file(tolog3) from logDecontaminate.flatMap()
+    file(tolog3) from logReadSubtraction.flatMap()
 
     script:
     """
     cat $tolog1 >> $logFileForDeduplicate
     cat $tolog2 >> $logFileForTrimming
-    cat $tolog3 >> $logFileForDecontamination
+    cat $tolog3 >> $logFileForReadSubtraction
     """
 }
 
 /*
- * STEP X - Output description HTML
+ * Output description HTML
  */
 process output_documentation {
     tag "$prefix"
