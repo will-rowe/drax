@@ -159,12 +159,9 @@ process get_software_versions {
 Channel
     .fromFilePairs( params.reads, size: params.singleEnd ? 1 : 2 )
     .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!\nIf this is single-end data, please specify --singleEnd on the command line." }
-    .set { read_files_fastqc }
+    .set { input_data }
 
-Channel
-    .fromFilePairs( params.reads )
-    .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!\nIf this is single-end data, please specify --singleEnd on the command line." }
-    .set { read_files_to_deduplicate }
+input_data.into { read_files_fastqc; read_files_to_deduplicate }
 
 
 /*
@@ -286,7 +283,7 @@ process trimming {
  */
 process readSubtraction {
     tag "$sampleID"
-    publishDir "${params.outdir}/clean_data", mode: 'copy', pattern: "*_clean.fq.gz"
+    publishDir "${params.outdir}/clean_data", mode: 'copy', pattern: "*clean*"
 
     input:
     set sampleID, file(reads) from read_files_to_readSubtraction
@@ -294,6 +291,7 @@ process readSubtraction {
 	output:
     file("${sampleID}.readSubtraction.log") into logReadSubtraction
     file("*_clean.fq.gz")
+    file("clean_data.stats") into quality_filtered_reads_stats
     set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads
 
     script:
@@ -316,10 +314,24 @@ process readSubtraction {
     # parse the command output and log more stuff
     sed -n '/Read 1 data:/,/Total time/p' .tmp >> ${sampleID}.readSubtraction.log
     cat .tmp >> ${sampleID}.readSubtraction.log
+
+    # get some stats on the file
+    seqkitCMD=\"seqkit stats --quiet -T --threads ${cpus} ${sampleID}_clean.fq.gz\"
+    exec \$seqkitCMD 2>&1 | tee ${sampleID}.stats
+    cat ${sampleID}.stats >> clean_data.stats
 	"""
 }
 
 
+/*
+ * Split the clean data into more channels (post filtering qc, resistome, taxa etc.)
+ */
+quality_filtered_reads.into { qc_reads_for_check; qc_reads_for_resistome }
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////    POST FILTERING QUALITY CHECK
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /*
  * Post QC FastQC check
  */
@@ -329,7 +341,7 @@ process postQCcheck {
         saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
 
     input:
-    set sampleID, file(reads) from quality_filtered_reads
+    set sampleID, file(reads) from qc_reads_for_check
 
     output:
     file "*_fastqc.{zip,html}" into fastqc_results2
@@ -369,6 +381,32 @@ process multiqc {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////    RESISTOME PROFILING
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ /*
+ * GROOT
+ */
+ process groot {
+    publishDir "${params.outdir}/GROOT", mode: 'copy'
+
+    input:
+    set sampleID, file(reads) from qc_reads_for_resistome
+    file(stats) from quality_filtered_reads_stats
+
+    output:
+    file "groot-align.log"
+
+    script:
+    """
+    # set up the groot index (work out the mean read length etc.)
+    setup_groot_index.sh ${stats} ${cpus} ${params.outdir}/groot-index
+
+    # align the reads
+    grootAlignCMD=\"groot align -i ${params.outdir}/groot-index -f ${reads[0]} -p ${cpus} > ${sampleID}-groot-classified.bam\"
+
+    # run the commands
+    exec \$grootAlignCMD 2>&1 | tee .tmp
+    """
+ }
+
 
 
 
