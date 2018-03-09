@@ -293,6 +293,7 @@ process readSubtraction {
     file("*_clean.fq.gz")
     file("${sampleID}_clean.stats") into quality_filtered_stats
     set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads
+    set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads_copy
 
     script:
 	"""
@@ -378,33 +379,27 @@ process multiqc {
 ////    RESISTOME PROFILING
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /*
-* Collect the stats from the QC'd reads and store in a single file
+* Collect the stats from the QC'd reads and store in a single file - then create a GROOT index
 */
 Channel
     .from('clean_data.stats').combine(quality_filtered_stats.flatMap())
     .collectFile(newLine: false, storeDir: params.outdir)
     .set { combined_stats_file }
 
-
- /*
- * GROOT index
- */
 process groot_index {
-    publishDir "${params.outdir}/GROOT", mode: 'copy'
-
     input:
     file(combined_stats) from combined_stats_file
 
     output:
-    file "grootIndex"
+    file "grootIndex" into groot_index
 
     script:
     """
     # get the average length column from the seqkit output
     cut -f 7 ${combined_stats} >> averageReadLength.txt
     # get the mean and stdev
-    meanRL=\$(awk \'{ sum +=\$1; n++ } END { if (n > 0) printf \"%3.0f\", sum /n}\' averageReadLength.txt)
-    stdev=\$(awk '{sum+=\$1; sumsq+=\$1*\$1} END {print sqrt(sumsq/NR - (sum/NR)**2)}\' averageReadLength.txt)
+    meanRL=\$(awk \'{ sum +=\$1; n++ } END { if (n > 0) printf \"%3.0f\", sum}\' averageReadLength.txt)
+    stdev=\$(awk '{sum+=\$1; sumsq+=\$1*\$1} END {print sqrt(sumsq/NR - (sum/NR)^2)}\' averageReadLength.txt)
 
     # check that we can generate a GROOT index suitable for all samples
     cutoff=10
@@ -413,7 +408,7 @@ process groot_index {
     fi
 
     # set up the commands
-    #download an ARG database for groot
+    # download an ARG database for groot
     grootGetCMD="groot get -d resfinder"
     # index the database
     grootIndexCMD="groot index -i resfinder.90 -o grootIndex -l \$meanRL -p ${cpus}"
@@ -425,35 +420,32 @@ process groot_index {
 }
 
 
-
 /*
-* GROOT
-
-Channel
-    .fromFilePairs( "$params.outdir/clean_data/*clean.fq.gz" )
-    .set { cleanReads }
+* Combine index and clean reads channel, then run groot align
+*/
+toGROOT = quality_filtered_reads_copy.combine(groot_index)
 
 process groot {
     publishDir "${params.outdir}/GROOT", mode: 'copy'
 
     input:
-    file(index) from grootIndex
-    set sampleID, file(reads) from cleanReads
+    set sampleID, file(reads), file(grootIndex) from toGROOT
 
     output:
+    file "grootIndex"
     file "groot-align.log"
     file "*.bam"
 
     script:
     """
     # align the reads
-    grootAlignCMD=\"groot align -i ${index} -f ${cleanReads} -p ${cpus}\"
+    grootAlignCMD=\"groot align -i ${grootIndex} -f ${reads} -p ${cpus}\"
 
     # run the commands
     exec \$grootAlignCMD > ${sampleID}-groot-classified.bam
     """
  }
-*/
+
 
 
 
