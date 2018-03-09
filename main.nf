@@ -398,8 +398,8 @@ process groot_index {
     # get the average length column from the seqkit output
     cut -f 7 ${combined_stats} >> averageReadLength.txt
     # get the mean and stdev
-    meanRL=\$(awk \'{ sum +=\$1; n++ } END { if (n > 0) printf \"%3.0f\", sum}\' averageReadLength.txt)
-    stdev=\$(awk '{sum+=\$1; sumsq+=\$1*\$1} END {print sqrt(sumsq/NR - (sum/NR)^2)}\' averageReadLength.txt)
+    meanRL=\$(awk \'{ x+=\$1; next } END { if (x > 0) printf \"%3.0f\", x/NR}\' averageReadLength.txt)
+    stdev=\$(awk \'{sum+=\$1; sumsq+=\$1*\$1} END {print sqrt(sumsq/NR - (sum/NR)^2)}\' averageReadLength.txt)
 
     # check that we can generate a GROOT index suitable for all samples
     cutoff=10
@@ -414,8 +414,8 @@ process groot_index {
     grootIndexCMD="groot index -i resfinder.90 -o grootIndex -l \$meanRL -p ${cpus}"
 
     # run the commands
-    exec \$grootGetCMD 2>&1 | tee setup_groot_index.log
-    exec \$grootIndexCMD 2>&1 | tee setup_groot_index.log
+    exec \$grootGetCMD 2>&1 | tee .tmp
+    exec \$grootIndexCMD 2>&1 | tee .tmp
     """
 }
 

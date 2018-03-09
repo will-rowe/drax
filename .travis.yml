@@ -1,7 +1,6 @@
 sudo: required
-dist: precise
+dist: trusty
 
-language: java
 jdk:
   - oraclejdk8
 
