@@ -154,17 +154,6 @@ process get_software_versions {
 
 
 /*
- * Create channels
- */
-Channel
-    .fromFilePairs( params.reads, size: params.singleEnd ? 1 : 2 )
-    .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!\nIf this is single-end data, please specify --singleEnd on the command line." }
-    .set { input_data }
-
-input_data.into { read_files_fastqc; read_files_to_deduplicate }
-
-
-/*
  * Do I need to set up number of CPUs to use (split accross the 2 channels)?
 if ( params.max_cpus < 2 ) {
     cpus = 1
@@ -175,6 +164,17 @@ if ( params.max_cpus < 2 ) {
 }
 */
 cpus = params.max_cpus
+
+
+/*
+ * Create channels
+ */
+Channel
+    .fromFilePairs( params.reads, size: params.singleEnd ? 1 : 2 )
+    .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!\nIf this is single-end data, please specify --singleEnd on the command line." }
+    .set { input_data }
+
+input_data.into { read_files_fastqc; read_files_to_deduplicate }
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -291,7 +291,7 @@ process readSubtraction {
 	output:
     file("${sampleID}.readSubtraction.log") into logReadSubtraction
     file("*_clean.fq.gz")
-    file("clean_data.stats") into quality_filtered_reads_stats
+    file("${sampleID}_clean.stats") into quality_filtered_stats
     set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads
 
     script:
@@ -317,16 +317,12 @@ process readSubtraction {
 
     # get some stats on the file
     seqkitCMD=\"seqkit stats --quiet -T --threads ${cpus} ${sampleID}_clean.fq.gz\"
-    exec \$seqkitCMD 2>&1 | tee ${sampleID}.stats
-    cat ${sampleID}.stats >> clean_data.stats
+    exec \$seqkitCMD 2>&1 | tee .tmp
+
+    # delete the header line from seqkit and send the file
+    tail -n +2 .tmp > ${sampleID}_clean.stats
 	"""
 }
-
-
-/*
- * Split the clean data into more channels (post filtering qc, resistome, taxa etc.)
- */
-quality_filtered_reads.into { qc_reads_for_check; qc_reads_for_resistome }
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -341,7 +337,7 @@ process postQCcheck {
         saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
 
     input:
-    set sampleID, file(reads) from qc_reads_for_check
+    set sampleID, file(reads) from quality_filtered_reads
 
     output:
     file "*_fastqc.{zip,html}" into fastqc_results2
@@ -381,15 +377,68 @@ process multiqc {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////    RESISTOME PROFILING
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/*
+* Collect the stats from the QC'd reads and store in a single file
+*/
+Channel
+    .from('clean_data.stats').combine(quality_filtered_stats.flatMap())
+    .collectFile(newLine: false, storeDir: params.outdir)
+    .set { combined_stats_file }
+
+
  /*
- * GROOT
+ * GROOT index
  */
- process groot {
+process groot_index {
     publishDir "${params.outdir}/GROOT", mode: 'copy'
 
     input:
-    set sampleID, file(reads) from qc_reads_for_resistome
-    file(stats) from quality_filtered_reads_stats
+    file(combined_stats) from combined_stats_file
+
+    output:
+    file "grootIndex"
+
+    script:
+    """
+    # get the average length column from the seqkit output
+    cut -f 7 ${combined_stats} >> averageReadLength.txt
+    # get the mean and stdev
+    meanRL=\$(awk \'{ sum +=\$1; n++ } END { if (n > 0) printf \"%3.0f\", sum /n}\' averageReadLength.txt)
+    stdev=\$(awk '{sum+=\$1; sumsq+=\$1*\$1} END {print sqrt(sumsq/NR - (sum/NR)**2)}\' averageReadLength.txt)
+
+    # check that we can generate a GROOT index suitable for all samples
+    cutoff=10
+    if [ \$stdev -gt \$cutoff ]; then
+        echo "The mean read length of the cleaned data is too variable to run GROOT on all samples!"; exit;
+    fi
+
+    # set up the commands
+    #download an ARG database for groot
+    grootGetCMD="groot get -d resfinder"
+    # index the database
+    grootIndexCMD="groot index -i resfinder.90 -o grootIndex -l \$meanRL -p ${cpus}"
+
+    # run the commands
+    exec \$grootGetCMD 2>&1 | tee setup_groot_index.log
+    exec \$grootIndexCMD 2>&1 | tee setup_groot_index.log
+    """
+}
+
+
+
+/*
+* GROOT
+
+Channel
+    .fromFilePairs( "$params.outdir/clean_data/*clean.fq.gz" )
+    .set { cleanReads }
+
+process groot {
+    publishDir "${params.outdir}/GROOT", mode: 'copy'
+
+    input:
+    file(index) from grootIndex
+    set sampleID, file(reads) from cleanReads
 
     output:
     file "groot-align.log"
@@ -397,16 +446,16 @@ process multiqc {
 
     script:
     """
-    # set up the groot index (work out the mean read length etc.)
-    setup_groot_index.sh ${stats} ${cpus} ${params.outdir}/groot-index
-
     # align the reads
-    grootAlignCMD=\"groot align -i ${params.outdir}/groot-index -f ${reads[0]} -p ${cpus}\"
+    grootAlignCMD=\"groot align -i ${index} -f ${cleanReads} -p ${cpus}\"
 
     # run the commands
     exec \$grootAlignCMD > ${sampleID}-groot-classified.bam
     """
  }
+*/
+
+
 
 
 
