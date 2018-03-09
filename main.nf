@@ -229,7 +229,7 @@ process deduplicate {
 	fi
 
     # run the command
-    exec \$dedupeCMD 2>&1 | tee .tmp
+    \$dedupeCMD 2>&1 | tee .tmp
 
     # parse the command output and log more stuff
     duplicatesFound=\$(grep \"Duplicates Found:\" .tmp | cut -f 1 | cut -d: -f 2 | sed 's/ //g')
@@ -270,7 +270,7 @@ process trimming {
 	fi
 
     # run the command
-    exec \$fastpCMD 2>&1 | tee .tmp
+    \$fastpCMD 2>&1 | tee .tmp
 
     # parse the command output and log more stuff
     sed -n '/Read1 before filtering/,/bases trimmed due to adapters/p' .tmp >> ${sampleID}.trimming.log
@@ -310,7 +310,7 @@ process readSubtraction {
 	fi
 
     # run the command
-    exec \$readSubtractionCMD 2>&1 | tee .tmp
+    \$readSubtractionCMD 2>&1 | tee .tmp
 
     # parse the command output and log more stuff
     sed -n '/Read 1 data:/,/Total time/p' .tmp >> ${sampleID}.readSubtraction.log
@@ -318,7 +318,7 @@ process readSubtraction {
 
     # get some stats on the file
     seqkitCMD=\"seqkit stats --quiet -T --threads ${cpus} ${sampleID}_clean.fq.gz\"
-    exec \$seqkitCMD 2>&1 | tee .tmp
+    \$seqkitCMD 2>&1 | tee .tmp
 
     # delete the header line from seqkit and send the file
     tail -n +2 .tmp > ${sampleID}_clean.stats
@@ -386,7 +386,7 @@ Channel
     .collectFile(newLine: false, storeDir: params.outdir)
     .set { combined_stats_file }
 
-process groot_index {
+process generate_groot_index {
     input:
     file(combined_stats) from combined_stats_file
 
@@ -414,8 +414,8 @@ process groot_index {
     grootIndexCMD="groot index -i resfinder.90 -o grootIndex -l \$meanRL -p ${cpus}"
 
     # run the commands
-    exec \$grootGetCMD 2>&1 | tee .tmp
-    exec \$grootIndexCMD 2>&1 | tee .tmp
+    \$grootGetCMD 2>&1 | tee .tmp
+    \$grootIndexCMD 2>&1 | tee .tmp
     """
 }
 
@@ -435,24 +435,56 @@ process groot {
     file "grootIndex"
     file "groot-align.log"
     file "*.bam"
+    //file "*.report"
+    file "*.report" into groot_reports
 
     script:
     """
+    # set up the commands
     # align the reads
     grootAlignCMD=\"groot align -i ${grootIndex} -f ${reads} -p ${cpus}\"
+    # report the profile
+    grootReportCMD=\"groot report -i ${sampleID}-groot-classified.bam -c 0.99 -p ${cpus}\"
 
     # run the commands
-    exec \$grootAlignCMD > ${sampleID}-groot-classified.bam
+    echo \$grootAlignCMD
+    \$grootAlignCMD > ${sampleID}-groot-classified.bam
+    echo \$grootReportCMD
+    \$grootReportCMD > ${sampleID}-groot.report
     """
  }
 
 
+ /*
+ * Collect the groot reports and process them to get a list of ARGs found accross the samples
+ */
+ Channel
+     .from('grootreports').combine(groot_reports.flatMap())
+     .collectFile(newLine: false, storeDir: "${params.outdir}/GROOT")
+     .set { combined_groot_reports }
 
+process get_ARGs {
+    publishDir "${params.outdir}/METACHERCHANT", mode: 'copy'
 
+     input:
+     file(groot_report) from combined_groot_reports
 
+     output:
+     file "groot-detected-args.fna"
 
+     script:
+     """
+     # download ARG-annot and index it
+     wget https://github.com/will-rowe/groot/raw/master/db/full-ARG-databases/resfinder/resfinder.fna
+     samtools faidx resfinder.fna
 
+     # extract all the ARGs found by groot
+     samtools faidx resfinder.fna `cut -f1 ${groot_report}` > groot-detected-args.fna
 
+     # remove duplicates
+     cat groot-detected-args.fna | seqkit rmdup -s -o groot-detected-args.fna
+     """
+}
 
 
 
