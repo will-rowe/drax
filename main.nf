@@ -441,8 +441,9 @@ process groot {
     file "grootIndex"
     file "groot-align.log"
     file "*.bam"
-    //file "*.report"
+    file "*.report"
     file "*.report" into groot_reports
+    set sampleID, file(reads) into reads_for_metacherchant
 
     script:
     """
@@ -450,12 +451,10 @@ process groot {
     # align the reads
     grootAlignCMD=\"groot align -i ${grootIndex} -f ${reads} -p ${cpus}\"
     # report the profile
-    grootReportCMD=\"groot report -i ${sampleID}-groot-classified.bam -c 0.99 -p ${cpus}\"
+    grootReportCMD=\"groot report -i ${sampleID}-groot-classified.bam --lowCov -p ${cpus}\"
 
     # run the commands
-    echo \$grootAlignCMD
     \$grootAlignCMD > ${sampleID}-groot-classified.bam
-    echo \$grootReportCMD
     \$grootReportCMD > ${sampleID}-groot.report
     """
  }
@@ -470,16 +469,20 @@ process groot {
      .set { combined_groot_reports }
 
 process get_ARGs {
-    publishDir "${params.outdir}/metacherchant", mode: 'copy'
 
      input:
      file(groot_report) from combined_groot_reports
 
      output:
-     file "groot-detected-args.fna"
+     file "groot-detected-args.fna" into detected_args
 
      script:
      """
+     # terminate if no ARGs were found in any sample
+     if [ ! -s ${groot_report} ]; then
+        echo "No ARGs were found in any samples!"; exit;
+     fi
+
      # download ARG-annot and index it
      wget https://github.com/will-rowe/groot/raw/master/db/full-ARG-databases/resfinder/resfinder.fna
      samtools faidx resfinder.fna
@@ -493,6 +496,35 @@ process get_ARGs {
 }
 
 
+/*
+* Run metacherchant
+*/
+toMETACHERCHANT = reads_for_metacherchant.combine(detected_args)
+
+process metacherchant {
+   publishDir "${params.outdir}/metacherchant", mode: 'copy'
+
+    input:
+    set sampleID, file(reads), file(detectedARGs) from toMETACHERCHANT
+
+    output:
+    file "groot-detected-args.fna"
+    file  "./${sampleID}/output"
+
+    script:
+    """
+        metacherchant.sh --tool environment-finder \
+            -k 31 \
+            --coverage=2 \
+            --maxradius 1000 \
+            --reads ${reads} \
+            --seq ${detectedARGs} \
+            --output "./${sampleID}" \
+            --work-dir "./${sampleID}/workDir" \
+            -p ${cpus} \
+            --trim
+    """
+}
 
 
 
