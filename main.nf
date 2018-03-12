@@ -23,7 +23,7 @@ def helpMessage() {
 
     The typical command for running the pipeline is as follows:
 
-    nextflow run will-rowe/drax --reads '*_R{1,2}.fastq.gz' -profile docker
+    drax --reads '*_R{1,2}.fastq.gz' -profile docker
 
     Mandatory arguments:
       --reads                                  Path to input data (must be surrounded with quotes)
@@ -32,7 +32,6 @@ def helpMessage() {
       --singleEnd                          Specifies that the input is single end reads
       --qual                                    Quality cut-off to use in QC workflow (deduplication, trimming etc.)
       --subReference                 Path to BBmap index for read subtraction
-      --fasta                                  Path to Fasta reference (not used yet...)
 
     Other options:
       --outdir                               The output directory where the results will be saved
@@ -65,22 +64,23 @@ params.singleEnd = false
 params.name = false
 params.multiqc_config = "$baseDir/conf/multiqc_config.yaml"
 params.reads = "data/*{1,2}.fastq.gz"
-params.outdir = './results'
+params.outdir = './drax-results'
 params.email = false
 params.plaintext_email = false
 multiqc_config = file(params.multiqc_config)
 output_docs = file("$baseDir/docs/output.md")
 params.qual = 20
 params.subReference = "${baseDir}/assets/bbmap"
-params.fasta = ""
 
 // Validate inputs
-if ( params.fasta ){
-    fasta = file(params.fasta)
-    if( !fasta.exists() ) exit 1, "Fasta file not found: ${params.fasta}"
-}
 bbmapRef = file(params.subReference)
-if ( !bbmapRef.isDirectory() ) exit 1, "errrrrrrr"
+bbmapRefcheck = file("${bbmapRef}/ref/genome/1/summary.txt")
+bbmapRefLink = file("${workflow.workDir}/subReference")
+if ( !bbmapRef.isDirectory() ) exit 1, "Supplied subtraction reference is not a directory! Needs to be a directory containing BBmap ref."
+if( !bbmapRefcheck.exists() ) exit 1, "Doesn't look like a BBmap index: ${bbmapRef}/ref"
+if( !bbmapRefLink.exists() ) {
+    bbmapRef.mklink(bbmapRefLink)
+}
 
 // Has the run name been specified by the user?
 //  this has the bonus effect of catching both -name and --name
@@ -96,8 +96,9 @@ log.info "========================================="
 def summary = [:]
 summary['Run Name']     = custom_runName ?: workflow.runName
 summary['Reads']        = params.reads
-summary['Fasta Ref']    = params.fasta
 summary['Data Type']    = params.singleEnd ? 'Single-End' : 'Paired-End'
+summary['Subtraction Ref.'] =   params.subReference
+summary['Quality cut-off']  =   params.qual
 summary['Max Memory']   = params.max_memory
 summary['Max CPUs']     = params.max_cpus
 summary['Max Time']     = params.max_time
@@ -130,9 +131,14 @@ try {
 }
 
 // create some additional log files
-logFileForDeduplicate = file(params.outdir + "/deduplicate.log")
-logFileForTrimming = file(params.outdir + "/trimming.log")
-logFileForReadSubtraction = file(params.outdir + "/readSubtraction.log")
+logDir = file("${params.outdir}/logs")
+if( !logDir.exists() ) {
+    logCheck = logDir.mkdir()
+    if ( !logCheck ) exit 1, "Cannot create log directory: $logDir"
+}
+logFileForDeduplicate = file(logDir + "/deduplicate.log")
+logFileForTrimming = file(logDir + "/trimming.log")
+logFileForReadSubtraction = file(logDir + "/readSubtraction.log")
 
 
 /*
@@ -304,9 +310,9 @@ process readSubtraction {
 
     # set up the command
 	if [ \"$params.singleEnd\" = \"false\" ]; then
-		readSubtractionCMD=\"bbwrap.sh mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} in2=${reads[1]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${params.subReference}\"
+		readSubtractionCMD=\"bbwrap.sh mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} in2=${reads[1]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${workflow.workDir}/subReference\"
     else
-        readSubtractionCMD=\"bbwrap.sh mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${params.subReference}\"
+        readSubtractionCMD=\"bbwrap.sh mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${workflow.workDir}/subReference\"
 	fi
 
     # run the command
@@ -354,7 +360,7 @@ process postQCcheck {
  * MultiQC
  */
 process multiqc {
-    publishDir "${params.outdir}/MultiQC", mode: 'copy'
+    publishDir "${params.outdir}/multiQC", mode: 'copy'
 
     input:
     file multiqc_config
@@ -426,7 +432,7 @@ process generate_groot_index {
 toGROOT = quality_filtered_reads_copy.combine(groot_index)
 
 process groot {
-    publishDir "${params.outdir}/GROOT", mode: 'copy'
+    publishDir "${params.outdir}/groot", mode: 'copy'
 
     input:
     set sampleID, file(reads), file(grootIndex) from toGROOT
@@ -460,11 +466,11 @@ process groot {
  */
  Channel
      .from('grootreports').combine(groot_reports.flatMap())
-     .collectFile(newLine: false, storeDir: "${params.outdir}/GROOT")
+     .collectFile(newLine: false, storeDir: "${params.outdir}/groot")
      .set { combined_groot_reports }
 
 process get_ARGs {
-    publishDir "${params.outdir}/METACHERCHANT", mode: 'copy'
+    publishDir "${params.outdir}/metacherchant", mode: 'copy'
 
      input:
      file(groot_report) from combined_groot_reports
@@ -520,7 +526,7 @@ process output_logs {
  */
 process output_documentation {
     tag "$prefix"
-    publishDir "${params.outdir}/Documentation", mode: 'copy'
+    publishDir "${params.outdir}/documentation", mode: 'copy'
 
     input:
     file output_docs
@@ -599,7 +605,7 @@ workflow.onComplete {
     }
 
     // Write summary e-mail HTML to a file
-    def output_d = new File( "${params.outdir}/Documentation/" )
+    def output_d = new File( "${params.outdir}/documentation/" )
     if( !output_d.exists() ) {
       output_d.mkdirs()
     }

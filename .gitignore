@@ -1,6 +1,6 @@
 .nextflow*
 work/
 data/
-results/
+drax-results/
 .DS_Store
 tests/test_data

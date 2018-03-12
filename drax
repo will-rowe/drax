@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+nextflow run will-rowe/drax $@
