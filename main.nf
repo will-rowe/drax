@@ -509,7 +509,7 @@ process metacherchant {
 
     output:
     file "groot-detected-args.fna"
-    file  "./${sampleID}/output"
+    file  "./${sampleID}"
 
     script:
     """
