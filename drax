@@ -1,3 +1,82 @@
 #!/usr/bin/env bash
+#
+#   This is a wrapper script for running Drax.
+#
+#   The main purpose of this script is to package Drax for the Conda recipe.
+#   This script also allows the user to download all the files needed for running Drax, which is useful
+#
 
-nextflow run will-rowe/drax $@
+# customisable parameters
+dataLocation="${PWD}/DRAX-files"
+GROOTdb="resfinder"
+
+# function to check return values
+function checkReturn {
+    if [[ $1 != 0 ]]; then
+        echo "  error!"
+        exit
+    fi
+}
+
+# print some stuff
+echo "############################################"
+echo "DRAX: Detecting Resistome Associated taXa"
+echo "############################################"
+echo ""
+
+# if no options are given, print the DRAX help and exit
+if [[ $# == 0 ]]; then
+
+    echo "before running drax for the first time, make sure to first run \`drax get\` to download all the required files!"
+    echo ""
+    echo "========================================="
+    echo ""
+    nextflow run will-rowe/drax --help
+    exit
+fi
+
+# if `get` subcommand not specified, run the pipeline
+if [[ $1 != "get" ]]; then
+    nextflow run will-rowe/drax $@
+
+# if `get` is specified, collect the files
+else
+
+    # create a directory to store the data
+    echo "running the DRAX get command"
+    echo "  creating the output directory..."
+    echo "  - output directory: ${dataLocation}"
+    mkdir -p ${dataLocation}
+    checkReturn $?
+    cd ${dataLocation} && echo "  - done"
+
+    # collect groot database
+    echo "  getting the GROOT database..."
+    groot get -d ${GROOTdb} > /dev/null
+    checkReturn $?
+    mv ${GROOTdb}.90 grootDB
+    echo "  - done"
+
+    # collect read subtraction database (http://seqanswers.com/forums/showthread.php?t=42552)
+    echo "  getting the read subtraction database..."
+    echo "  - this may take a little while (~10 minutes)"
+    wget -q -O hg19_main_mask_ribo_animal_allplant_allfungus.fa.gz https://zenodo.org/record/1208052/files/hg19_main_mask_ribo_animal_allplant_allfungus.fa.gz
+    checkReturn $?
+    bbmap.sh ref=hg19_main_mask_ribo_animal_allplant_allfungus.fa.gz -Xmx32g &> /dev/null
+    checkReturn $?
+    echo "  - done"
+
+    # finish up by pulling most recent pipeline
+    echo "  pulling most recent version of DRAX..."
+    nextflow pull will-rowe/drax > /dev/null
+    checkReturn $?
+    echo "  - done"
+
+    # finish
+    echo "finished the DRAX get command!"
+    echo ""
+    echo "you can now run the DRAX pipeline with a command like this:"
+    echo ""
+    echo "  drax --reads 'data/*R{1,2}.fastq.gz' --refData ${dataLocation}"
+    echo ""
+fi

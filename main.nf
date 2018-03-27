@@ -23,21 +23,24 @@ def helpMessage() {
 
     The typical command for running the pipeline is as follows:
 
-    drax --reads '*_R{1,2}.fastq.gz' -profile docker
+    drax --reads '*_R{1,2}.fastq.gz' --refData ./DRAX-files
 
     Mandatory arguments:
-      --reads                                  Path to input data (must be surrounded with quotes)
+      --reads           Path to input data (must be surrounded with quotes)
+      --refData         Path to reference data (run `drax get` to download this)
 
     QC options:
-      --singleEnd                          Specifies that the input is single end reads
-      --qual                                    Quality cut-off to use in QC workflow (deduplication, trimming etc.)
-      --subReference                 Path to BBmap index for read subtraction
+      --singleEnd       Specifies that the input is single end reads
+      --qual            Quality cut-off to use in QC workflow (deduplication, trimming etc.)
+      --decontaminate   Peform read subtraction using masked HG19 reference (default = true)
 
     Other options:
-      --outdir                               The output directory where the results will be saved
-      --email                                Set this parameter to your e-mail address to get a summary e-mail with details of the run sent to you when the workflow exits
-      -name                                 Name for the pipeline run. If not specified, Nextflow will automatically generate a random mnemonic
-      -profile                               Hardware config to use. docker / aws
+      --outdir          The output directory where the results will be saved
+      --email           Set this parameter to your e-mail address to get a summary e-mail with details of the run sent to you when the workflow exits
+      -name             Name for the pipeline run. If not specified, Nextflow will automatically generate a random mnemonic
+      -profile          Specify docker or standard (default)
+      --max_cpus        Number of CPUs to use (default = max available)
+      --max_memory      Amount of RAM to use (default = 32 GB)
     """.stripIndent()
 }
 
@@ -63,23 +66,26 @@ if (params.help){
 params.singleEnd = false
 params.name = false
 params.multiqc_config = "$baseDir/conf/multiqc_config.yaml"
-params.reads = "data/*{1,2}.fastq.gz"
+params.reads = ""
+params.refData  = ""
 params.outdir = './drax-results'
 params.email = false
 params.plaintext_email = false
 multiqc_config = file(params.multiqc_config)
 output_docs = file("$baseDir/docs/output.md")
 params.qual = 20
-params.subReference = "${baseDir}/assets/bbmap"
+params.decontaminate = true
 
 // Validate inputs
-bbmapRef = file(params.subReference)
-bbmapRefcheck = file("${bbmapRef}/ref/genome/1/summary.txt")
-bbmapRefLink = file("${workflow.workDir}/subReference")
-if ( !bbmapRef.isDirectory() ) exit 1, "Supplied subtraction reference is not a directory! Needs to be a directory containing BBmap ref."
-if( !bbmapRefcheck.exists() ) exit 1, "Doesn't look like a BBmap index: ${bbmapRef}/ref"
-if( !bbmapRefLink.exists() ) {
-    bbmapRef.mklink(bbmapRefLink)
+if ( params.reads  == "" ) exit 1, "Must provide reads ('some/path/*_R{1,2}.fastq.gz')"
+if ( params.refData  == "" ) exit 1, "Must provide reference data (--refData), use `drax get` to download it"
+refData = file(params.refData)
+if ( !refData.exists() ) exit 1, "Supplied refData  does not exist!"
+if ( !refData.isDirectory() ) exit 1, "Supplied refData is not a directory!"
+// TODO: check here that the refData dir has the correct contents
+refDataLink = file("${workflow.workDir}/ref-data")
+if( !refDataLink.exists() ) {
+    refData.mklink(refDataLink)
 }
 
 // Has the run name been specified by the user?
@@ -97,13 +103,11 @@ def summary = [:]
 summary['Run Name']     = custom_runName ?: workflow.runName
 summary['Reads']        = params.reads
 summary['Data Type']    = params.singleEnd ? 'Single-End' : 'Paired-End'
-summary['Subtraction Ref.'] =   params.subReference
-summary['Quality cut-off']  =   params.qual
+summary['Output Dir']   = params.outdir
+summary['Working Dir']  = workflow.workDir
 summary['Max Memory']   = params.max_memory
 summary['Max CPUs']     = params.max_cpus
 summary['Max Time']     = params.max_time
-summary['Output dir']   = params.outdir
-summary['Working dir']  = workflow.workDir
 summary['Container']    = workflow.container
 if(workflow.revision) summary['Pipeline Release'] = workflow.revision
 summary['Current home']   = "$HOME"
@@ -112,6 +116,9 @@ summary['Current path']   = "$PWD"
 summary['Script dir']     = workflow.projectDir
 summary['Config Profile'] = workflow.profile
 if(params.email) summary['E-mail Address'] = params.email
+summary['Reference Data'] =   params.refData
+summary['Quality Cut-off']  =   params.qual
+summary['Decontaminate'] = params.decontaminate
 log.info summary.collect { k,v -> "${k.padRight(15)}: $v" }.join("\n")
 log.info "========================================="
 
@@ -160,19 +167,6 @@ process get_software_versions {
 
 
 /*
- * Do I need to set up number of CPUs to use (split accross the 2 channels)?
-if ( params.max_cpus < 2 ) {
-    cpus = 1
-} else if ( params.max_cpus%2 == 0 ) {
-    cpus = ( params.max_cpus / 2 )
-} else {
-    cpus = ( (params.max_cpus - 1) / 2 )
-}
-*/
-cpus = params.max_cpus
-
-
-/*
  * Create channels
  */
 Channel
@@ -182,6 +176,7 @@ Channel
 
 input_data.into { read_files_fastqc; read_files_to_deduplicate }
 
+cpus = params.max_cpus
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////    QUALITY  CONTROL
@@ -308,21 +303,25 @@ process readSubtraction {
     echo "SAMPLE: ${sampleID}" >> ${sampleID}.readSubtraction.log
     echo "------------------------------------------------------" >> ${sampleID}.readSubtraction.log
 
-    # set up the command
-	if [ \"$params.singleEnd\" = \"false\" ]; then
-		readSubtractionCMD=\"bbwrap.sh mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} in2=${reads[1]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${workflow.workDir}/subReference\"
+    if [ \"${params.decontaminate}\" = \"false\" ]; then
+        interleaveCMD=\"interleave-fastq.py ${reads[0]} ${reads[1]}\"
+        \$interleaveCMD > ${sampleID}_clean.fq
+        gzip ${sampleID}_clean.fq
     else
-        readSubtractionCMD=\"bbwrap.sh mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${workflow.workDir}/subReference\"
-	fi
+    	if [ \"$params.singleEnd\" = \"false\" ]; then
+    		readSubtractionCMD=\"bbwrap.sh -Xmx32g mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} in2=${reads[1]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${workflow.workDir}/ref-data\"
+        else
+            readSubtractionCMD=\"bbwrap.sh -Xmx32g mapper=bbmap quickmatch fast ow=true append=t in1=${reads[0]} outu=${sampleID}_clean.fq.gz outm=${sampleID}_contamination.fq minid=0.97 maxindel=5 minhits=2 threads=${cpus} path=${workflow.workDir}/ref-data\"
+    	fi
+        # run the command
+        \$readSubtractionCMD 2>&1 | tee .tmp
 
-    # run the command
-    \$readSubtractionCMD 2>&1 | tee .tmp
+        # parse the command output and log more stuff
+        sed -n '/Read 1 data:/,/Total time/p' .tmp >> ${sampleID}.readSubtraction.log
+        cat .tmp >> ${sampleID}.readSubtraction.log
+    fi
 
-    # parse the command output and log more stuff
-    sed -n '/Read 1 data:/,/Total time/p' .tmp >> ${sampleID}.readSubtraction.log
-    cat .tmp >> ${sampleID}.readSubtraction.log
-
-    # get some stats on the file
+    # get some stats on the QC'd reads
     seqkitCMD=\"seqkit stats --quiet -T --threads ${cpus} ${sampleID}_clean.fq.gz\"
     \$seqkitCMD 2>&1 | tee .tmp
 
@@ -413,14 +412,10 @@ process generate_groot_index {
         echo "The mean read length of the cleaned data is too variable to run GROOT on all samples!"; exit;
     fi
 
-    # set up the commands
-    # download an ARG database for groot
-    grootGetCMD="groot get -d resfinder"
-    # index the database
-    grootIndexCMD="groot index -i resfinder.90 -o grootIndex -l \$meanRL -p ${cpus}"
+    # set up the command
+    grootIndexCMD="groot index -i ${workflow.workDir}/ref-data/grootDB -o grootIndex -l \$meanRL -p ${cpus} -y groot-index.log"
 
     # run the commands
-    \$grootGetCMD 2>&1 | tee .tmp
     \$grootIndexCMD 2>&1 | tee .tmp
     """
 }
@@ -439,23 +434,23 @@ process groot {
 
     output:
     file "grootIndex"
-    file "groot-align.log"
+    file "*.log"
     file "*.bam"
+    file "*.groot-graphs"
     file "*.report"
     file "*.report" into groot_reports
     set sampleID, file(reads) into reads_for_metacherchant
 
     script:
     """
-    # set up the commands
-    # align the reads
-    grootAlignCMD=\"groot align -i ${grootIndex} -f ${reads} -p ${cpus}\"
-    # report the profile
-    grootReportCMD=\"groot report -i ${sampleID}-groot-classified.bam --lowCov -p ${cpus}\"
-
     # run the commands
-    \$grootAlignCMD > ${sampleID}-groot-classified.bam
-    \$grootReportCMD > ${sampleID}-groot.report
+    groot align -i ${grootIndex} -f ${reads} -p ${cpus} -y ${sampleID}.groot-align.log -o ${sampleID}.groot-graphs > out.bam
+    groot report -i out.bam --lowCov -y ${sampleID}.groot-report.log > ${sampleID}-groot.report
+
+    # notify if groot report is empty
+    if [ ! -s ${sampleID}-groot.report ]; then
+        echo "no ARGs were found by GROOT for ${sampleID}..."
+    fi
     """
  }
 
