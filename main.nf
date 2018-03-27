@@ -295,6 +295,7 @@ process readSubtraction {
     file("${sampleID}_clean.stats") into quality_filtered_stats
     set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads
     set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads_copy
+    set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads_for_kaiju
 
     script:
 	"""
@@ -464,7 +465,6 @@ process groot {
      .set { combined_groot_reports }
 
 process get_ARGs {
-
      input:
      file(groot_report) from combined_groot_reports
 
@@ -522,10 +522,30 @@ process metacherchant {
 }
 
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////    TAXANOMIC PROFILING
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/*
+* Collect the QC'd reads and run Kaiju
+*/
+process kaiju {
+    publishDir "${params.outdir}/kaiju", mode: 'copy'
 
+    input:
+    set sampleID, file(reads) from quality_filtered_reads_for_kaiju
 
+    output:
+    file "*kaiju.out"
+    file "*.html"
 
-
+    script:
+    """
+    # run the commands
+    kaiju -z ${cpus} -t ${workflow.workDir}/ref-data/nodes.dmp -f ${workflow.workDir}/ref-data/kaiju_db.fmi -i ${reads} -o ${sampleID}.kaiju.out
+    kaiju2krona -t ${workflow.workDir}/ref-data/nodes.dmp -n ${workflow.workDir}/ref-data/names.dmp -i ${sampleID}.kaiju.out -o ${sampleID}.kaiju.out.krona
+    ktImportText -o ${sampleID}.kaiju.out.html ${sampleID}.kaiju.out.krona
+    """
+ }
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

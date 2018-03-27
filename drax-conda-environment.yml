@@ -8,3 +8,5 @@ seqkit==0.7.2
 samtools==1.4
 groot==0.5
 metacherchant==0.1.0
+kaiju==1.6.2
+krona==2.7

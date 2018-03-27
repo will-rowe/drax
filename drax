@@ -66,6 +66,12 @@ else
     checkReturn $?
     echo "  - done"
 
+    # collect the Kaiju RefSeq database
+    echo "  getting the Kaiju RefSeq database..."
+    echo "  - this may also take a little while (~60 minutes)"
+    wget http://kaiju.binf.ku.dk/database/kaiju_index.tgz
+    tar -xvf kaiju_index.tgz
+
     # finish up by pulling most recent pipeline
     echo "  pulling most recent version of DRAX..."
     nextflow pull will-rowe/drax > /dev/null

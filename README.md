@@ -44,15 +44,10 @@ curl -s https://get.nextflow.io | bash
 ./nextflow run will-rowe/drax --reads 'tests/*R{1,2}.fq.gz' -with-singularity 'docker://wpmr/drax'
 ```
 
+## Workflow
+
+![workflow](assets/misc/pipeline-workflow.png)
 
 ## Documentation
 
-The `DRAX` pipeline comes with documentation about the pipeline, found in the `docs/` directory:
-
-1. [Installation](docs/installation.md)
-2. Pipeline configuration
-    * [Local installation](docs/configuration/local.md)
-    * [Adding your own system](docs/configuration/adding_your_own.md)
-3. [Running the pipeline](docs/usage.md)
-4. [Output and how to interpret the results](docs/output.md)
-5. [Troubleshooting](docs/troubleshooting.md)
+The `DRAX` pipeline comes with documentation about the pipeline, found in the [docs](/docs) directory. This is still being added to as the pipeline is developed.
