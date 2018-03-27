@@ -3,8 +3,8 @@ git clone https://github.com/will-rowe/drax drax-repo && cd drax-repo/tests
 
 # set up dummy refData as real data too large for build tests
 mkdir DRAX-data && cd $_
-groot get -d groot-core-db
-mv groot-core-db.90 grootDB
+groot get
+mv arg-annot.90 grootDB
 
 # run tests
 run_name="Test drax Run: "$(date +%s)
