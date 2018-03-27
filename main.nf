@@ -641,6 +641,8 @@ workflow.onComplete {
     def output_tf = new File( output_d, "pipeline_report.txt" )
     output_tf.withWriter { w -> w << email_txt }
 
-    log.info "[drax] Pipeline Complete"
-
+    log.info "========================================="
+    log.info "[drax] Pipeline complete"
+    log.info "[drax] Results are in: ${params.outdir}"
+    log.info "========================================="
 }
