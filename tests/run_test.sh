@@ -8,7 +8,7 @@ mv arg-annot.90 grootDB
 
 # run tests
 run_name="Test drax Run: "$(date +%s)
-cmd="nextflow run ../main.nf -name \"${run_name}\" --max_cpus 1 --reads \"./*R{1,2}.fastq.gz\" --refData ./DRAX-data --decontaminate false"
+cmd="nextflow run ../main.nf -name \"${run_name}\" --max_cpus 1 --max_memory '7300.MB' --reads \"./*R{1,2}.fastq.gz\" --refData ./DRAX-data --decontaminate false"
 echo "Starting nextflow... Command:"
 echo $cmd
 echo "-------------------------------------------------------"
