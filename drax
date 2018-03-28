@@ -27,11 +27,16 @@ echo ""
 # if no options are given, print the DRAX help and exit
 if [[ $# == 0 ]]; then
 
-    echo "before running drax for the first time, make sure to first run \`drax get\` to download all the required files!"
+    echo "========================================="
+    echo ""
+    echo "run \`drax get\` to download all the required files (you only need to run this once)"
+    echo ""
+    echo "run \`drax --reads '*_R{1,2}.fastq.gz' --refData ./DRAX-files\` to set the pipeline going"
+    echo ""
+    echo "run \`drax --help\` for a full list of options"
     echo ""
     echo "========================================="
     echo ""
-    nextflow run will-rowe/drax --help
     exit
 fi
 

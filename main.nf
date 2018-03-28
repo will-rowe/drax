@@ -39,7 +39,7 @@ def helpMessage() {
       --email           Set this parameter to your e-mail address to get a summary e-mail with details of the run sent to you when the workflow exits
       -name             Name for the pipeline run. If not specified, Nextflow will automatically generate a random mnemonic
       -profile          Specify docker or standard (default)
-      --noTaxa      Don't run Kaiju (default = false)
+      --noTaxa          Don't run Kaiju (default = false)
       --max_cpus        Number of CPUs to use (default = max available)
       --max_memory      Amount of RAM to use (default = 32 GB)
     """.stripIndent()
@@ -542,7 +542,7 @@ process kaiju {
 
     when:
     params.noTaxa == false
-    
+
     script:
     """
     # run the commands

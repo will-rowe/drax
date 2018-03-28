@@ -15,23 +15,19 @@
 
 `DRAX` is a [Nextflow](https://www.nextflow.io) pipeline to detect resistome associated taxa in metagenomes. It identifies Antimicrobial Resistance Genes (ARGs) using [GROOT](https://www.biorxiv.org/content/early/2018/02/28/270835), extracts the genomic environment of each ARG using [Metacherchant](https://academic.oup.com/bioinformatics/article-abstract/34/3/434/4575138?redirectedFrom=fulltext) and then performs taxanomic classification of assembled environments. Further pipeline steps and full documentation are being added.
 
+## Installation
 
-## Quick Start
+### Bioconda
 
-You can use [bioconda](https://bioconda.github.io/) to manage all of the `DRAX` pipeline dependencies:
+For ease of use, the `DRAX` pipeline is called by a wrapper script that allows you to either download the required reference data, run the `DRAX` [Nextflow](https://www.nextflow.io) pipeline or update the pipeline. It is easiest to install `DRAX` using [Bioconda](https://bioconda.github.io/):
 
 ```
-# Get the software requirements list
-wget https://raw.githubusercontent.com/will-rowe/drax/master/drax-conda-environment.yml
-
-# Create a conda environment
-yes | conda env create -n drax -f drax-conda-environment.yml && source activate drax
-
-# Run DRAX
-nextflow run will-rowe/drax --reads 'tests/*R{1,2}.fq.gz'
+conda install drax -c bioconda
 ```
 
-Alternatively, you can also run `DRAX` using containers:
+### Containers
+
+You can also run `DRAX` using containers instead of conda. This will bypass the wrapper script so you will need to download the required reference data yourself.
 
 ```
 # Install Nextflow
@@ -43,6 +39,34 @@ curl -s https://get.nextflow.io | bash
 # OR run DRAX with Singularity
 ./nextflow run will-rowe/drax --reads 'tests/*R{1,2}.fq.gz' -with-singularity 'docker://wpmr/drax'
 ```
+
+## Quick Start
+
+The first time you use `DRAX`, you will need to get the required data:
+
+```
+drax get
+```
+
+* this will download several databases (masked hg19 for decontamination, ResFinder for GROOT, Kaiju RefSeq DB...)
+* it can take a little while (databases total ~10GB compressed)
+* you only need to do this **once**
+* the default directory is `./DRAX-files` but you can rename/move it later
+* this command will also update the pipeline to the most current version
+
+Now you can run `DRAX`:
+
+```
+drax --reads 'tests/*R{1,2}.fq.gz' --refData ./DRAX-files
+```
+
+For a full list of options, just run:
+
+```
+drax --help
+```
+
+Also, read the [documentation](/docs) for a more detailed overview of `DRAX`.
 
 ## Workflow
 
