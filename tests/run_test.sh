@@ -5,6 +5,7 @@ git clone https://github.com/will-rowe/drax drax-repo && cd drax-repo/tests
 mkdir DRAX-data && cd DRAX-data
 groot get
 mv arg-annot.90 grootDB
+cd ..
 
 # run tests
 run_name="Test drax Run: "$(date +%s)
