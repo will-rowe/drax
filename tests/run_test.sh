@@ -3,8 +3,8 @@ git clone https://github.com/will-rowe/drax drax-repo && cd drax-repo/tests
 
 # set up dummy refData as real data too large for build tests
 mkdir DRAX-data && cd DRAX-data
-groot get -d resfinder
-mv resfinder.90 grootDB
+groot get -d arg-annot
+mv arg-annot.90 grootDB
 cd ..
 
 # run tests
