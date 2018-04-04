@@ -294,9 +294,8 @@ process readSubtraction {
 	output:
     file("${sampleID}.readSubtraction.log") into logReadSubtraction
     file("*_clean.fq.gz")
-    file("${sampleID}_clean.stats") into quality_filtered_stats
-    set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads
-    set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads_copy
+    set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads_for_postQC
+    set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads_for_groot
     set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads_for_kaiju
 
     script:
@@ -323,13 +322,6 @@ process readSubtraction {
         sed -n '/Read 1 data:/,/Total time/p' .tmp >> ${sampleID}.readSubtraction.log
         cat .tmp >> ${sampleID}.readSubtraction.log
     fi
-
-    # get some stats on the QC'd reads
-    seqkitCMD=\"seqkit stats --quiet -T --threads ${cpus} ${sampleID}_clean.fq.gz\"
-    \$seqkitCMD 2>&1 | tee .tmp
-
-    # delete the header line from seqkit and send the file
-    tail -n +2 .tmp > ${sampleID}_clean.stats
 	"""
 }
 
@@ -346,7 +338,7 @@ process postQCcheck {
         saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
 
     input:
-    set sampleID, file(reads) from quality_filtered_reads
+    set sampleID, file(reads) from quality_filtered_reads_for_postQC
 
     output:
     file "*_fastqc.{zip,html}" into fastqc_results2
@@ -387,53 +379,13 @@ process multiqc {
 ////    RESISTOME PROFILING
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /*
-* Collect the stats from the QC'd reads and store in a single file - then create a GROOT index
+* Generate a GROOT index, run GROOT align and then create a report
 */
-Channel
-    .from('clean_data.stats').combine(quality_filtered_stats.flatMap())
-    .collectFile(newLine: false, storeDir: params.outdir)
-    .set { combined_stats_file }
-
-process generate_groot_index {
-    input:
-    file(combined_stats) from combined_stats_file
-
-    output:
-    file "grootIndex" into groot_index
-
-    script:
-    """
-    # get the average length column from the seqkit output
-    cut -f 7 ${combined_stats} >> averageReadLength.txt
-    # get the mean and stdev
-    meanRL=\$(awk \'{ x+=\$1; next } END { if (x > 0) printf \"%3.0f\", x/NR}\' averageReadLength.txt)
-    stdev=\$(awk \'{sum+=\$1; sumsq+=\$1*\$1} END {print sqrt(sumsq/NR - (sum/NR)^2)}\' averageReadLength.txt)
-
-    # check that we can generate a GROOT index suitable for all samples
-    cutoff=10
-    if [ \$stdev -gt \$cutoff ]; then
-        echo "The mean read length of the cleaned data is too variable to run GROOT on all samples!"; exit;
-    fi
-
-    # set up the command
-    grootIndexCMD="groot index -i ${workflow.workDir}/ref-data/grootDB -o grootIndex -l \$meanRL -p ${cpus} -y groot-index.log"
-
-    # run the commands
-    \$grootIndexCMD 2>&1 | tee .tmp
-    """
-}
-
-
-/*
-* Combine index and clean reads channel, then run groot align
-*/
-toGROOT = quality_filtered_reads_copy.combine(groot_index)
-
-process groot {
+process find_ARGs {
     publishDir "${params.outdir}/groot", mode: 'copy'
 
     input:
-    set sampleID, file(reads), file(grootIndex) from toGROOT
+    set sampleID, file(reads) from quality_filtered_reads_for_groot
 
     output:
     file "grootIndex"
@@ -446,9 +398,23 @@ process groot {
 
     script:
     """
+    # get some stats on the QC'd reads
+    seqkitCMD=\"seqkit stats --quiet -T --threads ${cpus} ${reads}\"
+    \$seqkitCMD 2>&1 | tee .tmp
+
+    # delete the header line from seqkit output, then collect the av read length
+    tail -n +2 .tmp > stats
+    rl=\$(printf "%.0f" \$(cut -f 7 stats))
+
+    # set up the GROOT commands
+    grootIndexCMD="groot index -i ${workflow.workDir}/ref-data/grootDB -o grootIndex -l \$rl -p ${cpus} -y ${sampleID}.groot-index.log"
+    grootAlignCMD="groot align -i grootIndex -f ${reads} -p ${cpus} -y ${sampleID}.groot-align.log -o ${sampleID}.groot-graphs"
+    grootReportCMD="groot report -i ${sampleID}.bam --lowCov -y ${sampleID}.groot-report.log"
+
     # run the commands
-    groot align -i ${grootIndex} -f ${reads} -p ${cpus} -y ${sampleID}.groot-align.log -o ${sampleID}.groot-graphs > out.bam
-    groot report -i out.bam --lowCov -y ${sampleID}.groot-report.log > ${sampleID}-groot.report
+    \$grootIndexCMD 2>&1 | tee .tmp
+    \$grootAlignCMD > ${sampleID}.bam
+    \$grootReportCMD > ${sampleID}-groot.report
 
     # notify if groot report is empty
     if [ ! -s ${sampleID}-groot.report ]; then
@@ -466,7 +432,7 @@ process groot {
      .collectFile(newLine: false, storeDir: "${params.outdir}/groot")
      .set { combined_groot_reports }
 
-process get_ARGs {
+process collect_ARGs {
      input:
      file(groot_report) from combined_groot_reports
 
@@ -480,12 +446,8 @@ process get_ARGs {
         echo "No ARGs were found in any samples!"; exit;
      fi
 
-     # download ARG-annot and index it
-     wget https://github.com/will-rowe/groot/raw/master/db/full-ARG-databases/resfinder/resfinder.fna
-     samtools faidx resfinder.fna
-
      # extract all the ARGs found by groot
-     samtools faidx resfinder.fna `cut -f1 ${groot_report}` > groot-detected-args.fna
+     samtools faidx ${workflow.workDir}/ref-data/arg-db.fna `cut -f1 ${groot_report}` > groot-detected-args.fna
 
      # remove duplicates
      cat groot-detected-args.fna | seqkit rmdup -s -o groot-detected-args.fna
@@ -494,11 +456,11 @@ process get_ARGs {
 
 
 /*
-* Run metacherchant
+* Run metacherchant on the found ARGs
 */
 toMETACHERCHANT = reads_for_metacherchant.combine(detected_args)
 
-process metacherchant {
+process find_CONTEXT {
    publishDir "${params.outdir}/metacherchant", mode: 'copy'
 
     input:
@@ -506,20 +468,57 @@ process metacherchant {
 
     output:
     file "groot-detected-args.fna"
-    file  "./${sampleID}"
+    file  "${sampleID}"
+    file "*.unitigs.fna" into unitigs
 
     script:
     """
-        metacherchant.sh --tool environment-finder \
-            -k 31 \
-            --coverage=2 \
-            --maxradius 1000 \
-            --reads ${reads} \
-            --seq ${detectedARGs} \
-            --output "./${sampleID}" \
-            --work-dir "./${sampleID}/workDir" \
-            -p ${cpus} \
-            --trim
+    # run metacherchant
+    metacherchant.sh --tool environment-finder \
+        -k 41 \
+        --coverage=10 \
+        --maxkmers=100000 \
+        --bothdirs=False \
+        --chunklength=100 \
+        --reads ${reads} \
+        --seq ${detectedARGs} \
+        --output "${sampleID}" \
+        --work-dir "${sampleID}/workDir" \
+        -p ${cpus} \
+        --trim
+
+    # rename outdir for each gene
+    grep '>' groot-detected-args.fna | sed 's/[^A-Za-z0-9._-]/_/g' > genes.txt
+    counter=1
+    while read -r line
+    do
+    cp ${sampleID}/\$counter/seqs.fasta ${sampleID}.\$line.unitigs.fna
+    counter=\$((counter+1))
+    done < genes.txt
+    """
+}
+
+
+/*
+* Classify unitigs
+*/
+process classify_CONTEXT {
+    publishDir "${params.outdir}/unitigs", mode: 'copy'
+
+    input:
+    file(unitigs) from unitigs
+
+    output:
+    file "*.html"
+
+    script:
+    """
+    for file in ${unitigs}
+    do
+    kaiju -z ${cpus} -t ${workflow.workDir}/ref-data/nodes.dmp -f ${workflow.workDir}/ref-data/kaiju_db.fmi -i \${file} -o \${file}.kaiju.out
+    kaiju2krona -t ${workflow.workDir}/ref-data/nodes.dmp -n ${workflow.workDir}/ref-data/names.dmp -i \${file}.kaiju.out -o \${file}.kaiju.out.krona
+    ktImportText -o \${file}.html \${file}.kaiju.out.krona
+    done
     """
 }
 
@@ -530,7 +529,7 @@ process metacherchant {
 /*
 * Collect the QC'd reads and run Kaiju
 */
-process kaiju {
+process get_TAXA {
     publishDir "${params.outdir}/kaiju", mode: 'copy'
 
     input:

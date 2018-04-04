@@ -5,6 +5,7 @@
 #   The main purpose of this script is to package Drax for the Conda recipe.
 #   This script also allows the user to download all the files needed for running Drax, which is useful
 #
+#   Requires: wget, samtools, groot, bbmap, nextflow
 
 # customisable parameters
 dataLocation="${PWD}/DRAX-files"
@@ -62,9 +63,15 @@ else
     mv ${GROOTdb}.90 grootDB
     echo "  - done"
 
+    # also collet the ARG database used by groot
+    echo "  getting ARG database..."
+    wget -q -O arg-db.fna https://github.com/will-rowe/groot/raw/master/db/full-ARG-databases/${GROOTdb}/${GROOTdb}.fna
+    samtools faidx  arg-db.fna
+    echo "  - done"
+
     # collect read subtraction database (http://seqanswers.com/forums/showthread.php?t=42552)
     echo "  getting the read subtraction database..."
-    echo "  - this may take a little while (~10 minutes)"
+    echo "  - this may take a little while"
     wget -q -O hg19_main_mask_ribo_animal_allplant_allfungus.fa.gz https://zenodo.org/record/1208052/files/hg19_main_mask_ribo_animal_allplant_allfungus.fa.gz
     checkReturn $?
     bbmap.sh ref=hg19_main_mask_ribo_animal_allplant_allfungus.fa.gz -Xmx32g &> /dev/null
@@ -73,8 +80,8 @@ else
 
     # collect the Kaiju RefSeq database
     echo "  getting the Kaiju RefSeq database..."
-    echo "  - this may also take a little while (~60 minutes)"
-    wget http://kaiju.binf.ku.dk/database/kaiju_index.tgz
+    echo "  - this may also take a little while"
+    wget -q http://kaiju.binf.ku.dk/database/kaiju_index.tgz
     tar -xvf kaiju_index.tgz
 
     # finish up by pulling most recent pipeline
