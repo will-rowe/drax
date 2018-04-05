@@ -39,7 +39,7 @@ def helpMessage() {
       --email           Set this parameter to your e-mail address to get a summary e-mail with details of the run sent to you when the workflow exits
       -name             Name for the pipeline run. If not specified, Nextflow will automatically generate a random mnemonic
       -profile          Specify docker or standard (default)
-      --noTaxa          Don't run Kaiju (default = false)
+      --runTest         For debugging, runs a test process and exits
       --max_cpus        Number of CPUs to use (default = max available)
       --max_memory      Amount of RAM to use (default = 32 GB)
     """.stripIndent()
@@ -76,7 +76,7 @@ multiqc_config = file(params.multiqc_config)
 output_docs = file("$baseDir/docs/output.md")
 params.qual = 20
 params.decontaminate = true
-params.noTaxa = false
+params.runTest = false
 
 // Validate inputs
 if ( params.reads  == "" ) exit 1, "Must provide reads ('some/path/*_R{1,2}.fastq.gz')"
@@ -151,7 +151,7 @@ logFileForReadSubtraction = file(logDir + "/readSubtraction.log")
 
 
 /*
- * Parse software version numbers
+ * Check software and parse software version numbers
  */
 process get_software_versions {
     output:
@@ -163,6 +163,8 @@ process get_software_versions {
     echo $workflow.nextflow.version > v_nextflow.txt
     fastqc --version > v_fastqc.txt
     multiqc --version > v_multiqc.txt
+    groot version > v_groot.txt
+    metacherchant.sh | grep -o "[0-9]\\.[0-9]\\.[0-9]" > v_metacherchant.txt
     scrape_software_versions.py > software_versions_mqc.yaml
     """
 }
@@ -197,6 +199,9 @@ process fastqc {
     output:
     file "*_fastqc.{zip,html}" into fastqc_results
 
+    when:
+    params.runTest == false
+
     script:
     """
     fastqc -q $reads -t $cpus
@@ -216,6 +221,9 @@ process deduplicate {
 	output:
     set sampleID, file("${sampleID}*.deduplicated.fq.gz") into read_files_to_trim
     file("${sampleID}.deduplicate.log") into logDeduplicate
+
+    when:
+    params.runTest == false
 
     script:
 	"""
@@ -258,6 +266,9 @@ process trimming {
     file("${sampleID}.trimming.log") into logTrimming
     set sampleID, file("${sampleID}*.deduplicated.trimmed.fq.gz") into read_files_to_readSubtraction
 
+    when:
+    params.runTest == false
+
     script:
 	"""
     # log some stuff
@@ -297,6 +308,9 @@ process readSubtraction {
     set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads_for_postQC
     set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads_for_groot
     set sampleID, file("${sampleID}*_clean.fq.gz") into quality_filtered_reads_for_kaiju
+
+    when:
+    params.runTest == false
 
     script:
 	"""
@@ -343,6 +357,9 @@ process postQCcheck {
     output:
     file "*_fastqc.{zip,html}" into fastqc_results2
 
+    when:
+    params.runTest == false
+
     script:
     """
     fastqc -q $reads -t $cpus
@@ -365,6 +382,9 @@ process multiqc {
     output:
     file "*multiqc_report.html" into multiqc_report
     file "*_data"
+
+    when:
+    params.runTest == false
 
     script:
     rtitle = custom_runName ? "--title \"$custom_runName\"" : ''
@@ -395,6 +415,9 @@ process find_ARGs {
     file "*.report"
     file "*.report" into groot_reports
     set sampleID, file(reads) into reads_for_metacherchant
+
+    when:
+    params.runTest == false
 
     script:
     """
@@ -439,6 +462,9 @@ process collect_ARGs {
      output:
      file "groot-detected-args.fna" into detected_args
 
+     when:
+     params.runTest == false
+
      script:
      """
      # terminate if no ARGs were found in any sample
@@ -470,6 +496,9 @@ process find_CONTEXT {
     file "groot-detected-args.fna"
     file  "${sampleID}"
     file "*.unitigs.fna" into unitigs
+
+    when:
+    params.runTest == false
 
     script:
     """
@@ -511,6 +540,9 @@ process classify_CONTEXT {
     output:
     file "*.html"
 
+    when:
+    params.runTest == false
+
     script:
     """
     for file in ${unitigs}
@@ -540,7 +572,7 @@ process get_TAXA {
     file "*.html"
 
     when:
-    params.noTaxa == false
+    params.runTest == false
 
     script:
     """
@@ -549,7 +581,7 @@ process get_TAXA {
     kaiju2krona -t ${workflow.workDir}/ref-data/nodes.dmp -n ${workflow.workDir}/ref-data/names.dmp -i ${sampleID}.kaiju.out -o ${sampleID}.kaiju.out.krona
     ktImportText -o ${sampleID}.kaiju.out.html ${sampleID}.kaiju.out.krona
     """
- }
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -563,6 +595,9 @@ process output_logs {
     file(tolog1) from logDeduplicate.flatMap()
     file(tolog2) from logTrimming.flatMap()
     file(tolog3) from logReadSubtraction.flatMap()
+
+    when:
+    params.runTest == false
 
     script:
     """
