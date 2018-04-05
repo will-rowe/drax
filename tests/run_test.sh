@@ -6,7 +6,7 @@ mkdir DRAX-data && cd DRAX-data
 groot get -d arg-annot
 mv arg-annot.90 grootDB
 cd ..
-wget -q -O arg-db.fna https://github.com/will-rowe/groot/blob/master/db/full-ARG-databases/arg-annot-db/argannot-args.fna
+wget -q -O arg-db.fna https://github.com/will-rowe/groot/blob/master/db/full-ARG-databases/arg-annot-db/arg-annot-db.fna
 samtools faidx  arg-db.fna
 
 # run tests
