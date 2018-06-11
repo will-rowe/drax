@@ -408,13 +408,7 @@ process find_ARGs {
     set sampleID, file(reads) from quality_filtered_reads_for_groot
 
     output:
-    file "grootIndex"
-    file "*.log"
-    file "*.bam"
-    file "*.groot-graphs"
-    file "*.report"
-    file "*.report" into groot_reports
-    set sampleID, file(reads) into reads_for_metacherchant
+    set sampleID, "*.groot.fastq.gz", "*.report" into for_metacherchant
 
     when:
     params.runTest == false
@@ -442,59 +436,23 @@ process find_ARGs {
     # notify if groot report is empty
     if [ ! -s ${sampleID}-groot.report ]; then
         echo "no ARGs were found by GROOT for ${sampleID}..."
+        touch ${sampleID}.groot.fastq.gz
+    else
+        mv ${reads} ${sampleID}.groot.fastq.gz
     fi
     """
  }
 
-
- /*
- * Collect the groot reports and process them to get a list of ARGs found accross the samples
- */
- Channel
-     .from('grootreports').combine(groot_reports.flatMap())
-     .collectFile(newLine: false, storeDir: "${params.outdir}/groot")
-     .set { combined_groot_reports }
-
-process collect_ARGs {
-     input:
-     file(groot_report) from combined_groot_reports
-
-     output:
-     file "groot-detected-args.fna" into detected_args
-
-     when:
-     params.runTest == false
-
-     script:
-     """
-     # terminate if no ARGs were found in any sample
-     if [ ! -s ${groot_report} ]; then
-        echo "No ARGs were found in any samples!"; exit;
-     fi
-
-     # extract all the ARGs found by groot
-     samtools faidx ${workflow.workDir}/ref-data/arg-db.fna `cut -f1 ${groot_report}` > groot-detected-args.fna
-
-     # remove duplicates
-     cat groot-detected-args.fna | seqkit rmdup -s -o groot-detected-args.fna
-     """
-}
-
-
 /*
 * Run metacherchant on the found ARGs
 */
-toMETACHERCHANT = reads_for_metacherchant.combine(detected_args)
-
 process find_CONTEXT {
    publishDir "${params.outdir}/metacherchant", mode: 'copy'
 
     input:
-    set sampleID, file(reads), file(detectedARGs) from toMETACHERCHANT
+    set sampleID, file(reads), file(report) from for_metacherchant
 
     output:
-    file "groot-detected-args.fna"
-    file  "${sampleID}"
     file "*.unitigs.fna" into unitigs
 
     when:
@@ -502,28 +460,42 @@ process find_CONTEXT {
 
     script:
     """
-    # run metacherchant
-    metacherchant.sh --tool environment-finder \
+    if [ ! -s ${reads} ]; then
+	touch ${sampleID}.no-args.unitigs.fna
+    else
+      # get the ARG references
+      samtools faidx ${workflow.workDir}/ref-data/arg-db.fna `cut -f1 ${report}` > groot-detected-args.fna
+
+      # run metacherchant
+      metacherchant.sh --tool environment-finder \
         -k 41 \
         --coverage=10 \
         --maxkmers=100000 \
         --bothdirs=False \
         --chunklength=100 \
         --reads ${reads} \
-        --seq ${detectedARGs} \
+        --seq groot-detected-args.fna \
         --output "${sampleID}" \
         --work-dir "${sampleID}/workDir" \
         -p ${cpus} \
         --trim
 
-    # rename outdir for each gene
-    grep '>' groot-detected-args.fna | sed 's/[^A-Za-z0-9._-]/_/g' > genes.txt
-    counter=1
-    while read -r line
-    do
-    cp ${sampleID}/\$counter/seqs.fasta ${sampleID}.\$line.unitigs.fna
-    counter=\$((counter+1))
-    done < genes.txt
+      # rename outdir for each gene TODO: this is assuming metacherchant numbers its output in the order genes are read from --seq
+      grep '>' groot-detected-args.fna | sed 's/[^A-Za-z0-9._-]/_/g' > genes.txt
+      counter=1
+      while read -r line
+      do
+        # metacherchant may not have worked for some genes, so just increment the counter without renaming
+        if [ -s ${sampleID}/\$counter/seqs.fasta ]; then
+          cp ${sampleID}/\$counter/seqs.fasta ${sampleID}.\$line.unitigs.fna
+        fi 
+        counter=\$((counter+1))
+      done < genes.txt
+      # if not context was found, send a dummy file TODO: handle this better...
+      if [ ! -s ${sampleID}/1seqs.fasta ]; then
+        touch ${sampleID}.no-unitigs-from-args.unitigs.fna
+      fi
+    fi
     """
 }
 
@@ -545,12 +517,16 @@ process classify_CONTEXT {
 
     script:
     """
-    for file in ${unitigs}
-    do
-    kaiju -z ${cpus} -t ${workflow.workDir}/ref-data/nodes.dmp -f ${workflow.workDir}/ref-data/kaiju_db.fmi -i \${file} -o \${file}.kaiju.out
-    kaiju2krona -t ${workflow.workDir}/ref-data/nodes.dmp -n ${workflow.workDir}/ref-data/names.dmp -i \${file}.kaiju.out -o \${file}.kaiju.out.krona
-    ktImportText -o \${file}.html \${file}.kaiju.out.krona
-    done
+    if [ ! -s ${unitigs} ]; then
+	touch ${unitigs}.html
+    else
+      for file in ${unitigs}
+      do
+        kaiju -z ${cpus} -t ${workflow.workDir}/ref-data/nodes.dmp -f ${workflow.workDir}/ref-data/kaiju_db.fmi -i \${file} -o \${file}.kaiju.out
+        kaiju2krona -t ${workflow.workDir}/ref-data/nodes.dmp -n ${workflow.workDir}/ref-data/names.dmp -i \${file}.kaiju.out -o \${file}.kaiju.out.krona
+        ktImportText -o \${file}.html \${file}.kaiju.out.krona
+      done
+    fi
     """
 }
 
